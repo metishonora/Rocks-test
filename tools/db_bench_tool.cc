@@ -2632,6 +2632,8 @@ void VerifyDBFromDB(std::string& truth_db_name) {
       }else if (name == "ycsbwkldb") {
         method = &Benchmark::YCSBWorkloadB;
       }else if (name == "ycsbwkldc") {
+        method = &Benchmark::YCSBWorkloadC;
+	  }else if (name == "ycsbwkldc2") {
         method = &Benchmark::YCSBWorkloadC2;
       }else if (name == "ycsbwkldd") {
         method = &Benchmark::YCSBWorkloadD;
@@ -5322,7 +5324,7 @@ void YCSBFillDB(ThreadState* thread) {
 
     int64_t reads_done = 0;
     int64_t writes_done = 0;
-    Duration duration(FLAGS_duration, 0);
+    Duration duration(FLAGS_duration, readwrites_);
 
     std::unique_ptr<const char[]> key_guard;
     Slice key = AllocateKey(&key_guard);
@@ -5391,97 +5393,117 @@ void YCSBFillDB(ThreadState* thread) {
     thread->stats.AddMessage(msg);
   }
 
-// Made some modifications from the original SILK code.
-void YCSBWorkloadA2(ThreadState* thread) {
-    ReadOptions options(FLAGS_verify_checksum, true);
-    RandomGenerator gen;
-    std::string value;
-    int64_t found = 0;
-    int get_weight = 0;
-    int put_weight = 0;
-    int64_t reads_done = 0;
-    int64_t writes_done = 0;
-    Duration duration(FLAGS_duration, readwrites_);
+// // Made some modifications from the original SILK code.
+// void YCSBWorkloadA2(ThreadState* thread) {
+//     ReadOptions options(FLAGS_verify_checksum, true);
+//     RandomGenerator gen;
+//     std::string value;
+//     int64_t found = 0;
+//     int get_weight = 0;
+//     int put_weight = 0;
+//     int64_t reads_done = 0;
+//     int64_t writes_done = 0;
+// 	int64_t bytes = 0;
+// 	PinnableSlice pinnable_val;
+//     Duration duration(FLAGS_duration, readwrites_);
 
-    std::unique_ptr<const char[]> key_guard;
-    Slice key = AllocateKey(&key_guard);
+//     std::unique_ptr<const char[]> key_guard;
+//     Slice key = AllocateKey(&key_guard);
 
-    init_latestgen(FLAGS_num);
-    init_zipf_generator(0, FLAGS_num);
+//     init_latestgen(FLAGS_num);
+//     init_zipf_generator(0, FLAGS_num);
 
-#ifdef LOG_KEYS
-    // Logging the used keys
-    std::vector<long> keys(LOG_NUM_KEYS);
-    int nKeys = 0;
-#endif
+// #ifdef LOG_KEYS
+//     // Logging the used keys
+//     std::vector<long> keys(LOG_NUM_KEYS);
+//     int nKeys = 0;
+// #endif
 
-    while (!duration.Done(1)) {
-		DB* db = SelectDB(thread);
+//     while (!duration.Done(1)) {
+// 		// DB* db = SelectDB(thread);
+// 		DBWithColumnFamilies* db_with_cfh = SelectDBWithCfh(thread);
 
-		long k;
-		if (FLAGS_YCSB_uniform_distribution){
-			// Generate number from uniform distribution
-			k = thread->rand.Next() % FLAGS_num;
-		} else {
-			k = next_value_latestgen() % FLAGS_num;
-		}
-		GenerateKeyFromInt(k, FLAGS_num, &key);
+// 		long k;
+// 		if (FLAGS_YCSB_uniform_distribution){
+// 			// Generate number from uniform distribution
+// 			k = thread->rand.Next() % FLAGS_num;
+// 		} else {
+// 			k = next_value_latestgen() % FLAGS_num;
+// 		}
+// 		GenerateKeyFromInt(k, FLAGS_num, &key);
 
-		if (get_weight == 0 && put_weight == 0) {
-			// one batch completed, reinitialize for next batch
-			get_weight = 50;
-			put_weight = 100 - get_weight;
-      	}
+// 		if (get_weight == 0 && put_weight == 0) {
+// 			// one batch completed, reinitialize for next batch
+// 			get_weight = 50;
+// 			put_weight = 100 - get_weight;
+//       	}
 
-		int next_op = thread->rand.Next() & 100;
-		Status s;
+// 		int next_op = thread->rand.Next() & 100;
+// 		Status s;
 
-		if (next_op < 50) {
-			// read
-			s = db->Get(options, key, &value);
+// 		if (next_op < 50) {
+// 			// read
+// 			// s = db->Get(options, key, &value);
+// 			if (FLAGS_num_column_families > 1) {
+// 				s = db_with_cfh->db->Get(options, db_with_cfh->GetCfh(k), key, &pinnable_val);
+// 			} else {
+// 				s = db_with_cfh->db->Get(options, db_with_cfh->db->DefaultColumnFamily(), key, &pinnable_val);
+// 			}
 
-			if (!s.ok() && !s.IsNotFound()) {
-				fprintf(stderr, "get error: %s\n", s.ToString().c_str());
-				// we continue after error rather than exiting so that we can
-				// find more errors if any
-			} else if (!s.IsNotFound()) {
-				found++;
-			}
-			get_weight--;
-			reads_done++;
-			thread->stats.FinishedOps(nullptr, db, 1, kRead);
-		} else {
-			// write
-			s = db->Put(write_options_, key, gen.Generate(value_size_));
-			if (!s.ok()) {
-				fprintf(stderr, "put error: %s\n", s.ToString().c_str());
-				exit(1);
-			}
-			put_weight--;
-			writes_done++;
-			thread->stats.FinishedOps(nullptr, db, 1, kWrite);
-		}
+// 			if (!s.ok() && !s.IsNotFound()) {
+// 				fprintf(stderr, "get error: %s\n", s.ToString().c_str());
+// 				// we continue after error rather than exiting so that we can
+// 				// find more errors if any
+// 			} else if (!s.IsNotFound()) {
+// 				found++;
+// 			}
+// 			get_weight--;
+// 			reads_done++;
 
-#ifdef LOG_KEYS
-      // LOGGING THE KEY
-      	keys[nKeys++] = k;
-#endif
-    }
+// 			if (thread->shared->read_rate_limiter.get() != nullptr &&
+//           read % 256 == 255) {
+//         		thread->shared->read_rate_limiter->Request(
+//             		256, Env::IO_HIGH, nullptr /* stats */, RateLimiter::OpType::kRead);
+//      		}
+//       		thread->stats.FinishedOps(db_with_cfh, db_with_cfh->db, 1, kRead);
+// 		} else {
+// 			// write
 
-    char msg[100];
-    snprintf(msg, sizeof(msg), "( reads:%" PRIu64 " writes:%" PRIu64 \
-             " total:%" PRIu64 " found:%" PRIu64 ")",
-             reads_done, writes_done, readwrites_, found);
-    thread->stats.AddMessage(msg);
+// 			if (FLAGS_num_column_families <= 1) {
+// 				s = db->Put(write_options_, key, gen.Generate(value_size_));
+// 			} else {
+// 				s = db->Put(write_options_, db_with_cfh->GetCfh(rand_num), key, gen.Generate(value_size_));
+// 			}
 
-#ifdef LOG_KEYS
-    std::ofstream output;
-    output.open("/nvme/result/keys.txt", std::ios_base::app);
-    for (int n = 0; n < nKeys; ++n) {
-      output << "Key: " << keys[n] << "\n";
-    }
-#endif
-  }
+// 			if (!s.ok()) {
+// 				fprintf(stderr, "put error: %s\n", s.ToString().c_str());
+// 				exit(1);
+// 			}
+// 			put_weight--;
+// 			writes_done++;
+// 			thread->stats.FinishedOps(nullptr, db, 1, kWrite);
+// 		}
+
+// #ifdef LOG_KEYS
+//       // LOGGING THE KEY
+//       	keys[nKeys++] = k;
+// #endif
+//     }
+
+//     char msg[100];
+//     snprintf(msg, sizeof(msg), "( reads:%" PRIu64 " writes:%" PRIu64 \
+//              " total:%" PRIu64 " found:%" PRIu64 ")",
+//              reads_done, writes_done, readwrites_, found);
+//     thread->stats.AddMessage(msg);
+
+// #ifdef LOG_KEYS
+//     std::ofstream output;
+//     output.open("/nvme/result/keys.txt", std::ios_base::app);
+//     for (int n = 0; n < nKeys; ++n) {
+//       output << "Key: " << keys[n] << "\n";
+//     }
+// #endif
+//   }
 
 
   // Workload B: Read mostly workload
@@ -5575,7 +5597,7 @@ void YCSBWorkloadA2(ThreadState* thread) {
 
     int64_t reads_done = 0;
     int64_t writes_done = 0;
-    Duration duration(FLAGS_duration, 0);
+    Duration duration(FLAGS_duration, reads_);
 
     std::unique_ptr<const char[]> key_guard;
     Slice key = AllocateKey(&key_guard);
