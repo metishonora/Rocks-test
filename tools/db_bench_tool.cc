@@ -7,14 +7,7 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file. See the AUTHORS file for names of contributors.
 
-//            USAGE
-// First, ./db_bench --benchmark="ycsbfilldb"
-// Then you can use ./db_bench --benchmark="ycsbwkldc"
-// use --YCSB_uniform_distribution=false to make keys zipfian.
-// Define LOG_KEYS to log all keys.
-
-#define LOG_KEYS
-#define LOG_NUM_KEYS 12500000
+// ./db_bench --benchmarks="ycsbfilldb,ycsbwklda,ycsbwkldc"
 
 #ifndef __STDC_FORMAT_MACROS
 #define __STDC_FORMAT_MACROS
@@ -2633,9 +2626,7 @@ void VerifyDBFromDB(std::string& truth_db_name) {
         method = &Benchmark::YCSBWorkloadB;
       }else if (name == "ycsbwkldc") {
         method = &Benchmark::YCSBWorkloadC;
-	  }else if (name == "ycsbwkldc2") {
-        method = &Benchmark::YCSBWorkloadC2;
-      }else if (name == "ycsbwkldd") {
+	  }else if (name == "ycsbwkldd") {
         method = &Benchmark::YCSBWorkloadD;
       }else if (name == "ycsbwklde") {
         method = &Benchmark::YCSBWorkloadE;
@@ -5393,119 +5384,6 @@ void YCSBFillDB(ThreadState* thread) {
     thread->stats.AddMessage(msg);
   }
 
-// // Made some modifications from the original SILK code.
-// void YCSBWorkloadA2(ThreadState* thread) {
-//     ReadOptions options(FLAGS_verify_checksum, true);
-//     RandomGenerator gen;
-//     std::string value;
-//     int64_t found = 0;
-//     int get_weight = 0;
-//     int put_weight = 0;
-//     int64_t reads_done = 0;
-//     int64_t writes_done = 0;
-// 	int64_t bytes = 0;
-// 	PinnableSlice pinnable_val;
-//     Duration duration(FLAGS_duration, readwrites_);
-
-//     std::unique_ptr<const char[]> key_guard;
-//     Slice key = AllocateKey(&key_guard);
-
-//     init_latestgen(FLAGS_num);
-//     init_zipf_generator(0, FLAGS_num);
-
-// #ifdef LOG_KEYS
-//     // Logging the used keys
-//     std::vector<long> keys(LOG_NUM_KEYS);
-//     int nKeys = 0;
-// #endif
-
-//     while (!duration.Done(1)) {
-// 		// DB* db = SelectDB(thread);
-// 		DBWithColumnFamilies* db_with_cfh = SelectDBWithCfh(thread);
-
-// 		long k;
-// 		if (FLAGS_YCSB_uniform_distribution){
-// 			// Generate number from uniform distribution
-// 			k = thread->rand.Next() % FLAGS_num;
-// 		} else {
-// 			k = next_value_latestgen() % FLAGS_num;
-// 		}
-// 		GenerateKeyFromInt(k, FLAGS_num, &key);
-
-// 		if (get_weight == 0 && put_weight == 0) {
-// 			// one batch completed, reinitialize for next batch
-// 			get_weight = 50;
-// 			put_weight = 100 - get_weight;
-//       	}
-
-// 		int next_op = thread->rand.Next() & 100;
-// 		Status s;
-
-// 		if (next_op < 50) {
-// 			// read
-// 			// s = db->Get(options, key, &value);
-// 			if (FLAGS_num_column_families > 1) {
-// 				s = db_with_cfh->db->Get(options, db_with_cfh->GetCfh(k), key, &pinnable_val);
-// 			} else {
-// 				s = db_with_cfh->db->Get(options, db_with_cfh->db->DefaultColumnFamily(), key, &pinnable_val);
-// 			}
-
-// 			if (!s.ok() && !s.IsNotFound()) {
-// 				fprintf(stderr, "get error: %s\n", s.ToString().c_str());
-// 				// we continue after error rather than exiting so that we can
-// 				// find more errors if any
-// 			} else if (!s.IsNotFound()) {
-// 				found++;
-// 			}
-// 			get_weight--;
-// 			reads_done++;
-
-// 			if (thread->shared->read_rate_limiter.get() != nullptr &&
-//           read % 256 == 255) {
-//         		thread->shared->read_rate_limiter->Request(
-//             		256, Env::IO_HIGH, nullptr /* stats */, RateLimiter::OpType::kRead);
-//      		}
-//       		thread->stats.FinishedOps(db_with_cfh, db_with_cfh->db, 1, kRead);
-// 		} else {
-// 			// write
-
-// 			if (FLAGS_num_column_families <= 1) {
-// 				s = db->Put(write_options_, key, gen.Generate(value_size_));
-// 			} else {
-// 				s = db->Put(write_options_, db_with_cfh->GetCfh(rand_num), key, gen.Generate(value_size_));
-// 			}
-
-// 			if (!s.ok()) {
-// 				fprintf(stderr, "put error: %s\n", s.ToString().c_str());
-// 				exit(1);
-// 			}
-// 			put_weight--;
-// 			writes_done++;
-// 			thread->stats.FinishedOps(nullptr, db, 1, kWrite);
-// 		}
-
-// #ifdef LOG_KEYS
-//       // LOGGING THE KEY
-//       	keys[nKeys++] = k;
-// #endif
-//     }
-
-//     char msg[100];
-//     snprintf(msg, sizeof(msg), "( reads:%" PRIu64 " writes:%" PRIu64 \
-//              " total:%" PRIu64 " found:%" PRIu64 ")",
-//              reads_done, writes_done, readwrites_, found);
-//     thread->stats.AddMessage(msg);
-
-// #ifdef LOG_KEYS
-//     std::ofstream output;
-//     output.open("/nvme/result/keys.txt", std::ios_base::app);
-//     for (int n = 0; n < nKeys; ++n) {
-//       output << "Key: " << keys[n] << "\n";
-//     }
-// #endif
-//   }
-
-
   // Workload B: Read mostly workload
   // This workload has a 95/5 reads/write mix.
   // Application example: photo tagging; add a tag is an update,
@@ -5525,7 +5403,7 @@ void YCSBFillDB(ThreadState* thread) {
 
     int64_t reads_done = 0;
     int64_t writes_done = 0;
-    Duration duration(FLAGS_duration, 0);
+    Duration duration(FLAGS_duration, readwrites_);
 
     std::unique_ptr<const char[]> key_guard;
     Slice key = AllocateKey(&key_guard);
@@ -5639,94 +5517,94 @@ void YCSBFillDB(ThreadState* thread) {
     thread->stats.AddMessage(msg);
   }
 
-  // Made some modifications from the original SILK code.
-  void YCSBWorkloadC2(ThreadState* thread) {
-    int64_t read = 0;
-    int64_t found = 0;
-    int64_t bytes = 0;
-    ReadOptions options(FLAGS_verify_checksum, true);
-    std::unique_ptr<const char[]> key_guard;
-    Slice key = AllocateKey(&key_guard);
-    PinnableSlice pinnable_val;
+//   // Made some modifications from the original SILK code.
+//   void YCSBWorkloadC2(ThreadState* thread) {
+//     int64_t read = 0;
+//     int64_t found = 0;
+//     int64_t bytes = 0;
+//     ReadOptions options(FLAGS_verify_checksum, true);
+//     std::unique_ptr<const char[]> key_guard;
+//     Slice key = AllocateKey(&key_guard);
+//     PinnableSlice pinnable_val;
 
-    RandomGenerator gen;
-    init_latestgen(FLAGS_num);
-    init_zipf_generator(0, FLAGS_num);
+//     RandomGenerator gen;
+//     init_latestgen(FLAGS_num);
+//     init_zipf_generator(0, FLAGS_num);
 
-    Duration duration(FLAGS_duration, reads_);
+//     Duration duration(FLAGS_duration, reads_);
 
-#ifdef LOG_KEYS
-    // Logging the used keys
-    std::vector<long> keys(LOG_NUM_KEYS);
-    int nKeys = 0;
-#endif
+// #ifdef LOG_KEYS
+//     // Logging the used keys
+//     std::vector<long> keys(LOG_NUM_KEYS);
+//     int nKeys = 0;
+// #endif
 
-    while (!duration.Done(1)) {
-      DBWithColumnFamilies* db_with_cfh = SelectDBWithCfh(thread);
+//     while (!duration.Done(1)) {
+//       DBWithColumnFamilies* db_with_cfh = SelectDBWithCfh(thread);
 
-      // zipfian
-      long k;
-      if (FLAGS_YCSB_uniform_distribution){
-        // Generate number from uniform distribution
-        k = thread->rand.Next() % FLAGS_num;
-      } else {
-        k = next_value_latestgen() % FLAGS_num;
-      }
+//       // zipfian
+//       long k;
+//       if (FLAGS_YCSB_uniform_distribution){
+//         // Generate number from uniform distribution
+//         k = thread->rand.Next() % FLAGS_num;
+//       } else {
+//         k = next_value_latestgen() % FLAGS_num;
+//       }
 
-      // int64_t key_rand = GetRandomKey(&thread->rand);
-      GenerateKeyFromInt(k, FLAGS_num, &key);
-#ifdef LOG_KEYS
-      // LOGGING THE KEY
-      keys[nKeys++] = k;
-#endif
+//       // int64_t key_rand = GetRandomKey(&thread->rand);
+//       GenerateKeyFromInt(k, FLAGS_num, &key);
+// #ifdef LOG_KEYS
+//       // LOGGING THE KEY
+//       keys[nKeys++] = k;
+// #endif
 
-      read++;
-      Status s;
-      if (FLAGS_num_column_families > 1) {
-        s = db_with_cfh->db->Get(options, db_with_cfh->GetCfh(k), key,
-                                 &pinnable_val);
-      } else {
-        pinnable_val.Reset();
-        s = db_with_cfh->db->Get(options,
-                                 db_with_cfh->db->DefaultColumnFamily(), key,
-                                 &pinnable_val);
-      }
-      if (s.ok()) {
-        found++;
-        bytes += key.size() + pinnable_val.size();
-      } else if (!s.IsNotFound()) {
-        fprintf(stderr, "Get returned an error: %s\n", s.ToString().c_str());
-        abort();
-      }
+//       read++;
+//       Status s;
+//       if (FLAGS_num_column_families > 1) {
+//         s = db_with_cfh->db->Get(options, db_with_cfh->GetCfh(k), key,
+//                                  &pinnable_val);
+//       } else {
+//         pinnable_val.Reset();
+//         s = db_with_cfh->db->Get(options,
+//                                  db_with_cfh->db->DefaultColumnFamily(), key,
+//                                  &pinnable_val);
+//       }
+//       if (s.ok()) {
+//         found++;
+//         bytes += key.size() + pinnable_val.size();
+//       } else if (!s.IsNotFound()) {
+//         fprintf(stderr, "Get returned an error: %s\n", s.ToString().c_str());
+//         abort();
+//       }
 
-      if (thread->shared->read_rate_limiter.get() != nullptr &&
-          read % 256 == 255) {
-        thread->shared->read_rate_limiter->Request(
-            256, Env::IO_HIGH, nullptr /* stats */, RateLimiter::OpType::kRead);
-      }
+//       if (thread->shared->read_rate_limiter.get() != nullptr &&
+//           read % 256 == 255) {
+//         thread->shared->read_rate_limiter->Request(
+//             256, Env::IO_HIGH, nullptr /* stats */, RateLimiter::OpType::kRead);
+//       }
 
-      thread->stats.FinishedOps(db_with_cfh, db_with_cfh->db, 1, kRead);
-    }
+//       thread->stats.FinishedOps(db_with_cfh, db_with_cfh->db, 1, kRead);
+//     }
 
-    char msg[100];
-    snprintf(msg, sizeof(msg), "(%" PRIu64 " of %" PRIu64 " found)\n",
-             found, read);
+//     char msg[100];
+//     snprintf(msg, sizeof(msg), "(%" PRIu64 " of %" PRIu64 " found)\n",
+//              found, read);
 
-    thread->stats.AddBytes(bytes);
-    thread->stats.AddMessage(msg);
+//     thread->stats.AddBytes(bytes);
+//     thread->stats.AddMessage(msg);
 
-    if (FLAGS_perf_level > rocksdb::PerfLevel::kDisable) {
-      thread->stats.AddMessage(get_perf_context()->ToString());
-    }
+//     if (FLAGS_perf_level > rocksdb::PerfLevel::kDisable) {
+//       thread->stats.AddMessage(get_perf_context()->ToString());
+//     }
 
-#ifdef LOG_KEYS
-    std::ofstream output;
-    output.open("/nvme/result/keys.txt", std::ios_base::app);
-    for (int n = 0; n < nKeys; ++n) {
-      output << "Key: " << keys[n] << "\n";
-    }
-#endif
-  }
+// #ifdef LOG_KEYS
+//     std::ofstream output;
+//     output.open("/nvme/result/keys.txt", std::ios_base::app);
+//     for (int n = 0; n < nKeys; ++n) {
+//       output << "Key: " << keys[n] << "\n";
+//     }
+// #endif
+//   }
 
 
   // Workload D: Read latest workload
@@ -5753,7 +5631,7 @@ void YCSBFillDB(ThreadState* thread) {
 
     int64_t reads_done = 0;
     int64_t writes_done = 0;
-    Duration duration(FLAGS_duration, 0);
+    Duration duration(FLAGS_duration, readwrites_);
 
     std::unique_ptr<const char[]> key_guard;
     Slice key = AllocateKey(&key_guard);
@@ -5839,7 +5717,7 @@ void YCSBFillDB(ThreadState* thread) {
 
     int64_t reads_done = 0;
     int64_t writes_done = 0;
-    Duration duration(FLAGS_duration, 0);
+    Duration duration(FLAGS_duration, readwrites_);
 
     std::unique_ptr<const char[]> key_guard;
     Slice key = AllocateKey(&key_guard);
@@ -5926,7 +5804,7 @@ void YCSBFillDB(ThreadState* thread) {
 
     int64_t reads_done = 0;
     int64_t writes_done = 0;
-    Duration duration(FLAGS_duration, 0);
+    Duration duration(FLAGS_duration, readwrites_);
 
     std::unique_ptr<const char[]> key_guard;
     Slice key = AllocateKey(&key_guard);
