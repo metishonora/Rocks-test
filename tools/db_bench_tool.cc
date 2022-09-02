@@ -7,7 +7,13 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file. See the AUTHORS file for names of contributors.
 
-// ./db_bench --benchmarks="ycsbfilldb,ycsbwklda,ycsbwkldc"
+/////////////////
+///   USAGE   ///
+/////////////////
+//    ./db_bench --benchmarks="ycsbfilldb,ycsbwklda,ycsbwkldc"
+//    To log keys, specify #define LOG_KEYS then recompile this file.
+
+// #define LOG_KEYS
 
 #ifdef GFLAGS
 #ifdef NUMA
@@ -8268,6 +8274,10 @@ void YCSBFillDB(ThreadState* thread) {
   // Default data size: 1 KB records
   // Request distribution: zipfian
   void YCSBWorkloadA(ThreadState* thread) {
+#ifdef LOG_KEYS
+    std::vector<long> keys(FLAGS_num);
+    long nKeys = 0;
+#endif
     ReadOptions options(FLAGS_verify_checksum, true);
     RandomGenerator gen;
     init_latestgen(FLAGS_num);
@@ -8335,16 +8345,25 @@ void YCSBFillDB(ThreadState* thread) {
              writes_done++;
              thread->stats.FinishedOps(nullptr, db, 1, kWrite);
             }
+
+#ifdef LOG_KEYS
+            keys[nKeys++] = k;
+#endif
       }
-
-
-
     }
     char msg[100];
     snprintf(msg, sizeof(msg), "( reads:%" PRIu64 " writes:%" PRIu64 \
              " total:%" PRIu64 " found:%" PRIu64 ")",
              reads_done, writes_done, readwrites_, found);
     thread->stats.AddMessage(msg);
+
+#ifdef LOG_KEYS
+    std::ofstream output;
+    output.open("/home/ss/rocksdb-bench-result/keys-A.txt", std::ios_base::app);
+    for (int n = 0; n < nKeys; ++n) {
+      output << keys[n] << "\n";
+    }
+#endif
   }
 
   // Workload B: Read mostly workload
@@ -8356,6 +8375,11 @@ void YCSBFillDB(ThreadState* thread) {
   // Default data size: 1 KB records
   // Request distribution: zipfian
   void YCSBWorkloadB(ThreadState* thread) {
+#ifdef LOG_KEYS
+    std::vector<long> keys(FLAGS_num);
+    long nKeys = 0;
+#endif
+
     ReadOptions options(FLAGS_verify_checksum, true);
     RandomGenerator gen;
     init_latestgen(FLAGS_num);
@@ -8412,13 +8436,22 @@ void YCSBFillDB(ThreadState* thread) {
             thread->stats.FinishedOps(nullptr, db, 1, kWrite);
         }
       }
-
+#ifdef LOG_KEYS
+      keys[nKeys++] = k;
+#endif
     }
     char msg[100];
     snprintf(msg, sizeof(msg), "( reads:%" PRIu64 " writes:%" PRIu64 \
              " total:%" PRIu64 " found:%" PRIu64 ")",
              reads_done, writes_done, readwrites_, found);
     thread->stats.AddMessage(msg);
+#ifdef LOG_KEYS
+    std::ofstream output;
+    output.open("/home/ss/rocksdb-bench-result/keys-B.txt", std::ios_base::app);
+    for (int n = 0; n < nKeys; ++n) {
+      output << keys[n] << "\n";
+    }
+#endif
   }
 
   // Workload C: Read only
@@ -8428,6 +8461,11 @@ void YCSBFillDB(ThreadState* thread) {
   // Default data size: 1 KB records
   // Request distribution: zipfian
   void YCSBWorkloadC(ThreadState* thread) {
+#ifdef LOG_KEYS
+    std::vector<long> keys(FLAGS_num);
+    long nKeys = 0;
+#endif
+
     ReadOptions options(FLAGS_verify_checksum, true);
     RandomGenerator gen;
     init_latestgen(FLAGS_num);
@@ -8470,105 +8508,24 @@ void YCSBFillDB(ThreadState* thread) {
       }
       reads_done++;
 
-      //std::cout << k << "\n";
-
+#ifdef LOG_KEYS
+      keys[nKeys++] = k;
+#endif
     }
     char msg[100];
     snprintf(msg, sizeof(msg), "( reads:%" PRIu64 " writes:%" PRIu64 \
              " total:%" PRIu64 " found:%" PRIu64 ")",
              reads_done, writes_done, readwrites_, found);
     thread->stats.AddMessage(msg);
+
+#ifdef LOG_KEYS
+    std::ofstream output;
+    output.open("/home/ss/rocksdb-bench-result/keys-C.txt", std::ios_base::app);
+    for (int n = 0; n < nKeys; ++n) {
+      output << keys[n] << "\n";
+    }
+#endif
   }
-
-//   // Made some modifications from the original SILK code.
-//   void YCSBWorkloadC2(ThreadState* thread) {
-//     int64_t read = 0;
-//     int64_t found = 0;
-//     int64_t bytes = 0;
-//     ReadOptions options(FLAGS_verify_checksum, true);
-//     std::unique_ptr<const char[]> key_guard;
-//     Slice key = AllocateKey(&key_guard);
-//     PinnableSlice pinnable_val;
-
-//     RandomGenerator gen;
-//     init_latestgen(FLAGS_num);
-//     init_zipf_generator(0, FLAGS_num);
-
-//     Duration duration(FLAGS_duration, reads_);
-
-// #ifdef LOG_KEYS
-//     // Logging the used keys
-//     std::vector<long> keys(LOG_NUM_KEYS);
-//     int nKeys = 0;
-// #endif
-
-//     while (!duration.Done(1)) {
-//       DBWithColumnFamilies* db_with_cfh = SelectDBWithCfh(thread);
-
-//       // zipfian
-//       long k;
-//       if (FLAGS_YCSB_uniform_distribution){
-//         // Generate number from uniform distribution
-//         k = thread->rand.Next() % FLAGS_num;
-//       } else {
-//         k = next_value_latestgen() % FLAGS_num;
-//       }
-
-//       // int64_t key_rand = GetRandomKey(&thread->rand);
-//       GenerateKeyFromInt(k, FLAGS_num, &key);
-// #ifdef LOG_KEYS
-//       // LOGGING THE KEY
-//       keys[nKeys++] = k;
-// #endif
-
-//       read++;
-//       Status s;
-//       if (FLAGS_num_column_families > 1) {
-//         s = db_with_cfh->db->Get(options, db_with_cfh->GetCfh(k), key,
-//                                  &pinnable_val);
-//       } else {
-//         pinnable_val.Reset();
-//         s = db_with_cfh->db->Get(options,
-//                                  db_with_cfh->db->DefaultColumnFamily(), key,
-//                                  &pinnable_val);
-//       }
-//       if (s.ok()) {
-//         found++;
-//         bytes += key.size() + pinnable_val.size();
-//       } else if (!s.IsNotFound()) {
-//         fprintf(stderr, "Get returned an error: %s\n", s.ToString().c_str());
-//         abort();
-//       }
-
-//       if (thread->shared->read_rate_limiter.get() != nullptr &&
-//           read % 256 == 255) {
-//         thread->shared->read_rate_limiter->Request(
-//             256, Env::IO_HIGH, nullptr /* stats */, RateLimiter::OpType::kRead);
-//       }
-
-//       thread->stats.FinishedOps(db_with_cfh, db_with_cfh->db, 1, kRead);
-//     }
-
-//     char msg[100];
-//     snprintf(msg, sizeof(msg), "(%" PRIu64 " of %" PRIu64 " found)\n",
-//              found, read);
-
-//     thread->stats.AddBytes(bytes);
-//     thread->stats.AddMessage(msg);
-
-//     if (FLAGS_perf_level > rocksdb::PerfLevel::kDisable) {
-//       thread->stats.AddMessage(get_perf_context()->ToString());
-//     }
-
-// #ifdef LOG_KEYS
-//     std::ofstream output;
-//     output.open("/nvme/result/keys.txt", std::ios_base::app);
-//     for (int n = 0; n < nKeys; ++n) {
-//       output << "Key: " << keys[n] << "\n";
-//     }
-// #endif
-//   }
-
 
   // Workload D: Read latest workload
   // In this workload, new records are inserted, and the most recently
@@ -8584,6 +8541,11 @@ void YCSBFillDB(ThreadState* thread) {
   // which orders items purely by time, and demands the latest, is very different than
   // workload here (which we believe is more typical of how people build systems.)
   void YCSBWorkloadD(ThreadState* thread) {
+#ifdef LOG_KEYS
+    std::vector<long> keys(FLAGS_num);
+    long nKeys = 0;
+#endif
+
     ReadOptions options(FLAGS_verify_checksum, true);
     RandomGenerator gen;
     init_latestgen(FLAGS_num);
@@ -8641,12 +8603,24 @@ void YCSBFillDB(ThreadState* thread) {
         }
       }
 
+#ifdef LOG_KEYS
+            keys[nKeys++] = k;
+#endif
+
     }
     char msg[100];
     snprintf(msg, sizeof(msg), "( reads:%" PRIu64 " writes:%" PRIu64 \
              " total:%" PRIu64 " found:%" PRIu64 ")",
              reads_done, writes_done, readwrites_, found);
     thread->stats.AddMessage(msg);
+
+#ifdef LOG_KEYS
+    std::ofstream output;
+    output.open("/home/ss/rocksdb-bench-result/keys-D.txt", std::ios_base::app);
+    for (int n = 0; n < nKeys; ++n) {
+      output << keys[n] << "\n";
+    }
+#endif
 
   }
 
@@ -8669,7 +8643,10 @@ void YCSBFillDB(ThreadState* thread) {
   // client works is that it will pick a start
   // key, and then request a number of records; this works fine even for hashed insertion.
   void YCSBWorkloadE(ThreadState* thread) {
-
+#ifdef LOG_KEYS
+    std::vector<long> keys(FLAGS_num);
+    long nKeys = 0;
+#endif
     ReadOptions options(FLAGS_verify_checksum, true);
     RandomGenerator gen;
     init_latestgen(FLAGS_num);
@@ -8735,6 +8712,9 @@ void YCSBFillDB(ThreadState* thread) {
         }
       }
 
+#ifdef LOG_KEYS
+            keys[nKeys++] = k;
+#endif
     }
     char msg[100];
     snprintf(msg, sizeof(msg), "( reads:%" PRIu64 " writes:%" PRIu64 \
@@ -8742,7 +8722,13 @@ void YCSBFillDB(ThreadState* thread) {
              reads_done, writes_done, readwrites_, found);
     thread->stats.AddMessage(msg);
 
-
+#ifdef LOG_KEYS
+    std::ofstream output;
+    output.open("/home/ss/rocksdb-bench-result/keys-E.txt", std::ios_base::app);
+    for (int n = 0; n < nKeys; ++n) {
+      output << keys[n] << "\n";
+    }
+#endif
   }
 
 
@@ -8757,6 +8743,11 @@ void YCSBFillDB(ThreadState* thread) {
   // Request distribution: zipfian
 
   void YCSBWorkloadF(ThreadState* thread) {
+#ifdef LOG_KEYS
+    std::vector<long> keys(FLAGS_num);
+    long nKeys = 0;
+#endif
+
     ReadOptions options(FLAGS_verify_checksum, true);
     RandomGenerator gen;
     init_latestgen(FLAGS_num);
@@ -8814,12 +8805,23 @@ void YCSBFillDB(ThreadState* thread) {
         }
       }
 
+#ifdef LOG_KEYS
+            keys[nKeys++] = k;
+#endif
     }
     char msg[100];
     snprintf(msg, sizeof(msg), "( reads:%" PRIu64 " writes:%" PRIu64 \
              " total:%" PRIu64 " found:%" PRIu64 ")",
              reads_done, writes_done, readwrites_, found);
     thread->stats.AddMessage(msg);
+
+#ifdef LOG_KEYS
+    std::ofstream output;
+    output.open("/home/ss/rocksdb-bench-result/keys-A.txt", std::ios_base::app);
+    for (int n = 0; n < nKeys; ++n) {
+      output << keys[n] << "\n";
+    }
+#endif
   }
 
 
