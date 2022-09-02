@@ -3,14 +3,16 @@
 //  COPYING file in the root directory) and Apache 2.0 License
 //  (found in the LICENSE.Apache file in the root directory).
 
+#pragma once
+
 #include <condition_variable>
 #include <mutex>
 #include <queue>
 #include <utility>
 
-#pragma once
+#include "rocksdb/rocksdb_namespace.h"
 
-namespace rocksdb {
+namespace ROCKSDB_NAMESPACE {
 
 template <class T>
 class channel {
@@ -60,8 +62,8 @@ class channel {
 
  private:
   std::condition_variable cv_;
-  std::mutex lock_;
+  mutable std::mutex lock_;
   std::queue<T> buffer_;
   bool eof_;
 };
-}  // namespace rocksdb
+}  // namespace ROCKSDB_NAMESPACE

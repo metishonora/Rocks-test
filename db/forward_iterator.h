@@ -4,43 +4,44 @@
 //  (found in the LICENSE.Apache file in the root directory).
 #pragma once
 
+#include "rocksdb/comparator.h"
 #ifndef ROCKSDB_LITE
 
 #include <string>
 #include <vector>
 #include <queue>
 
+#include "memory/arena.h"
 #include "rocksdb/db.h"
 #include "rocksdb/iterator.h"
 #include "rocksdb/options.h"
-#include "db/dbformat.h"
 #include "table/internal_iterator.h"
-#include "util/arena.h"
 
-namespace rocksdb {
+namespace ROCKSDB_NAMESPACE {
 
 class DBImpl;
 class Env;
 struct SuperVersion;
 class ColumnFamilyData;
-class LevelIterator;
+class ForwardLevelIterator;
 class VersionStorageInfo;
 struct FileMetaData;
 
 class MinIterComparator {
  public:
-  explicit MinIterComparator(const Comparator* comparator) :
-    comparator_(comparator) {}
+  explicit MinIterComparator(const CompareInterface* comparator)
+      : comparator_(comparator) {}
 
   bool operator()(InternalIterator* a, InternalIterator* b) {
     return comparator_->Compare(a->key(), b->key()) > 0;
   }
  private:
-  const Comparator* comparator_;
+  const CompareInterface* comparator_;
 };
 
-typedef std::priority_queue<InternalIterator*, std::vector<InternalIterator*>,
-                            MinIterComparator> MinIterHeap;
+using MinIterHeap =
+    std::priority_queue<InternalIterator*, std::vector<InternalIterator*>,
+                        MinIterComparator>;
 
 /**
  * ForwardIterator is a special type of iterator that only supports Seek()
@@ -52,10 +53,11 @@ typedef std::priority_queue<InternalIterator*, std::vector<InternalIterator*>,
 class ForwardIterator : public InternalIterator {
  public:
   ForwardIterator(DBImpl* db, const ReadOptions& read_options,
-                  ColumnFamilyData* cfd, SuperVersion* current_sv = nullptr);
+                  ColumnFamilyData* cfd, SuperVersion* current_sv = nullptr,
+                  bool allow_unprepared_value = false);
   virtual ~ForwardIterator();
 
-  void SeekForPrev(const Slice& target) override {
+  void SeekForPrev(const Slice& /*target*/) override {
     status_ = Status::NotSupported("ForwardIterator::SeekForPrev()");
     valid_ = false;
   }
@@ -75,6 +77,7 @@ class ForwardIterator : public InternalIterator {
   virtual Slice key() const override;
   virtual Slice value() const override;
   virtual Status status() const override;
+  virtual bool PrepareValue() override;
   virtual Status GetProperty(std::string prop_name, std::string* prop) override;
   virtual void SetPinnedItersMgr(
       PinnedIteratorsManager* pinned_iters_mgr) override;
@@ -85,10 +88,18 @@ class ForwardIterator : public InternalIterator {
 
  private:
   void Cleanup(bool release_sv);
+  // Unreference and, if needed, clean up the current SuperVersion. This is
+  // either done immediately or deferred until this iterator is unpinned by
+  // PinnedIteratorsManager.
   void SVCleanup();
+  static void SVCleanup(
+    DBImpl* db, SuperVersion* sv, bool background_purge_on_iterator_cleanup);
+  static void DeferredSVCleanup(void* arg);
+
   void RebuildIterators(bool refresh_sv);
   void RenewIterators();
-  void BuildLevelIterators(const VersionStorageInfo* vstorage);
+  void BuildLevelIterators(const VersionStorageInfo* vstorage,
+                           SuperVersion* sv);
   void ResetIncompleteIterators();
   void SeekInternal(const Slice& internal_key, bool seek_to_first);
   void UpdateCurrent();
@@ -113,13 +124,14 @@ class ForwardIterator : public InternalIterator {
   ColumnFamilyData* const cfd_;
   const SliceTransform* const prefix_extractor_;
   const Comparator* user_comparator_;
+  const bool allow_unprepared_value_;
   MinIterHeap immutable_min_heap_;
 
   SuperVersion* sv_;
   InternalIterator* mutable_iter_;
   std::vector<InternalIterator*> imm_iters_;
   std::vector<InternalIterator*> l0_iters_;
-  std::vector<LevelIterator*> level_iters_;
+  std::vector<ForwardLevelIterator*> level_iters_;
   InternalIterator* current_;
   bool valid_;
 
@@ -149,5 +161,5 @@ class ForwardIterator : public InternalIterator {
   Arena arena_;
 };
 
-}  // namespace rocksdb
+}  // namespace ROCKSDB_NAMESPACE
 #endif  // ROCKSDB_LITE

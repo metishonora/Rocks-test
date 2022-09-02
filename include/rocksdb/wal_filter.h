@@ -4,18 +4,30 @@
 //  (found in the LICENSE.Apache file in the root directory).
 
 #pragma once
-#include <string>
-#include <map>
 
-namespace rocksdb {
+#include <map>
+#include <string>
+
+#include "rocksdb/customizable.h"
+#include "rocksdb/rocksdb_namespace.h"
+
+namespace ROCKSDB_NAMESPACE {
 
 class WriteBatch;
+struct ConfigOptions;
 
 // WALFilter allows an application to inspect write-ahead-log (WAL)
 // records or modify their processing on recovery.
 // Please see the details below.
-class WalFilter {
+//
+// Exceptions MUST NOT propagate out of overridden functions into RocksDB,
+// because RocksDB is not exception-safe. This could cause undefined behavior
+// including data loss, unreported corruption, deadlocks, and more.
+class WalFilter : public Customizable {
  public:
+  static const char* Type() { return "WalFilter"; }
+  static Status CreateFromString(const ConfigOptions& options,
+                                 const std::string& value, WalFilter** result);
   enum class WalProcessingOption {
     // Continue processing as usual
     kContinueProcessing = 0,
@@ -33,7 +45,7 @@ class WalFilter {
   virtual ~WalFilter() {}
 
   // Provide ColumnFamily->LogNumber map to filter
-  // so that filter can determine whether a log number applies to a given 
+  // so that filter can determine whether a log number applies to a given
   // column family (i.e. that log hasn't been flushed to SST already for the
   // column family).
   // We also pass in name->id map as only name is known during
@@ -44,8 +56,8 @@ class WalFilter {
   // @params cf_name_id_map   column_family_name to column_family_id map
 
   virtual void ColumnFamilyLogNumberMap(
-    const std::map<uint32_t, uint64_t>& cf_lognumber_map,
-    const std::map<std::string, uint32_t>& cf_name_id_map) {}
+      const std::map<uint32_t, uint64_t>& /*cf_lognumber_map*/,
+      const std::map<std::string, uint32_t>& /*cf_name_id_map*/) {}
 
   // LogRecord is invoked for each log record encountered for all the logs
   // during replay on logs on recovery. This method can be used to:
@@ -75,27 +87,25 @@ class WalFilter {
   // @returns               Processing option for the current record.
   //                        Please see WalProcessingOption enum above for
   //                        details.
-  virtual WalProcessingOption LogRecordFound(unsigned long long log_number,
-                                        const std::string& log_file_name,
-                                        const WriteBatch& batch,
-                                        WriteBatch* new_batch,
-                                        bool* batch_changed) {
+  virtual WalProcessingOption LogRecordFound(
+      unsigned long long /*log_number*/, const std::string& /*log_file_name*/,
+      const WriteBatch& batch, WriteBatch* new_batch, bool* batch_changed) {
     // Default implementation falls back to older function for compatibility
     return LogRecord(batch, new_batch, batch_changed);
   }
 
-  // Please see the comments for LogRecord above. This function is for 
-  // compatibility only and contains a subset of parameters. 
+  // Please see the comments for LogRecord above. This function is for
+  // compatibility only and contains a subset of parameters.
   // New code should use the function above.
-  virtual WalProcessingOption LogRecord(const WriteBatch& batch,
-                                        WriteBatch* new_batch,
-                                        bool* batch_changed) const {
+  virtual WalProcessingOption LogRecord(const WriteBatch& /*batch*/,
+                                        WriteBatch* /*new_batch*/,
+                                        bool* /*batch_changed*/) const {
     return WalProcessingOption::kContinueProcessing;
   }
 
   // Returns a name that identifies this WAL filter.
   // The name will be printed to LOG file on start up for diagnosis.
-  virtual const char* Name() const = 0;
+  virtual const char* Name() const override = 0;
 };
 
-}  // namespace rocksdb
+}  // namespace ROCKSDB_NAMESPACE

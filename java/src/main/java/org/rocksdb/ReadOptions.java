@@ -17,6 +17,31 @@ public class ReadOptions extends RocksObject {
   }
 
   /**
+   * @param verifyChecksums verification will be performed on every read
+   *     when set to true
+   * @param fillCache if true, then fill-cache behavior will be performed.
+   */
+  public ReadOptions(final boolean verifyChecksums, final boolean fillCache) {
+    super(newReadOptions(verifyChecksums, fillCache));
+  }
+
+  /**
+   * Copy constructor.
+   *
+   * NOTE: This does a shallow copy, which means snapshot, iterate_upper_bound
+   * and other pointers will be cloned!
+   *
+   * @param other The ReadOptions to copy.
+   */
+  public ReadOptions(ReadOptions other) {
+    super(copyReadOptions(other.nativeHandle_));
+    this.iterateLowerBoundSlice_ = other.iterateLowerBoundSlice_;
+    this.iterateUpperBoundSlice_ = other.iterateUpperBoundSlice_;
+    this.timestampSlice_ = other.timestampSlice_;
+    this.iterStartTs_ = other.iterStartTs_;
+  }
+
+  /**
    * If true, all data read from underlying storage will be
    * verified against corresponding checksums.
    * Default: true
@@ -168,8 +193,12 @@ public class ReadOptions extends RocksObject {
   /**
    * Returns whether managed iterators will be used.
    *
-   * @return the setting of whether managed iterators will be used, by default false
+   * @return the setting of whether managed iterators will be used,
+   *     by default false
+   *
+   * @deprecated This options is not used anymore.
    */
+  @Deprecated
   public boolean managed() {
     assert(isOwningHandle());
     return managed(nativeHandle_);
@@ -182,7 +211,10 @@ public class ReadOptions extends RocksObject {
    *
    * @param managed if true, then managed iterators will be enabled.
    * @return the reference to the current ReadOptions.
+   *
+   * @deprecated This options is not used anymore.
    */
+  @Deprecated
   public ReadOptions setManaged(final boolean managed) {
     assert(isOwningHandle());
     setManaged(nativeHandle_, managed);
@@ -223,7 +255,6 @@ public class ReadOptions extends RocksObject {
     assert(isOwningHandle());
     return prefixSameAsStart(nativeHandle_);
   }
-
 
   /**
    * Enforce that the iterator only iterates over the same prefix as the seek.
@@ -333,6 +364,37 @@ public class ReadOptions extends RocksObject {
   }
 
   /**
+   * A threshold for the number of keys that can be skipped before failing an
+   * iterator seek as incomplete.
+   *
+   * @return the number of keys that can be skipped
+   *     before failing an iterator seek as incomplete.
+   */
+  public long maxSkippableInternalKeys() {
+    assert(isOwningHandle());
+    return maxSkippableInternalKeys(nativeHandle_);
+  }
+
+  /**
+   * A threshold for the number of keys that can be skipped before failing an
+   * iterator seek as incomplete. The default value of 0 should be used to
+   * never fail a request as incomplete, even on skipping too many keys.
+   *
+   * Default: 0
+   *
+   * @param maxSkippableInternalKeys the number of keys that can be skipped
+   *     before failing an iterator seek as incomplete.
+   *
+   * @return the reference to the current ReadOptions.
+   */
+  public ReadOptions setMaxSkippableInternalKeys(
+      final long maxSkippableInternalKeys) {
+    assert(isOwningHandle());
+    setMaxSkippableInternalKeys(nativeHandle_, maxSkippableInternalKeys);
+    return this;
+  }
+
+  /**
    * If true, keys deleted using the DeleteRange() API will be visible to
    * readers until they are naturally deleted during compaction. This improves
    * read performance in DBs with many range deletions.
@@ -363,7 +425,360 @@ public class ReadOptions extends RocksObject {
     return this;
   }
 
+  /**
+   * Defines the smallest key at which the backward
+   * iterator can return an entry. Once the bound is passed,
+   * {@link RocksIterator#isValid()} will be false.
+   *
+   * The lower bound is inclusive i.e. the bound value is a valid
+   * entry.
+   *
+   * If prefix_extractor is not null, the Seek target and `iterate_lower_bound`
+   * need to have the same prefix. This is because ordering is not guaranteed
+   * outside of prefix domain.
+   *
+   * Default: null
+   *
+   * @param iterateLowerBound Slice representing the lower bound
+   * @return the reference to the current ReadOptions.
+   */
+  public ReadOptions setIterateLowerBound(final AbstractSlice<?> iterateLowerBound) {
+    assert(isOwningHandle());
+    setIterateLowerBound(
+        nativeHandle_, iterateLowerBound == null ? 0 : iterateLowerBound.getNativeHandle());
+    // Hold onto a reference so it doesn't get garbage collected out from under us.
+    iterateLowerBoundSlice_ = iterateLowerBound;
+    return this;
+  }
+
+  /**
+   * Returns the smallest key at which the backward
+   * iterator can return an entry.
+   *
+   * The lower bound is inclusive i.e. the bound value is a valid entry.
+   *
+   * @return the smallest key, or null if there is no lower bound defined.
+   */
+  public Slice iterateLowerBound() {
+    assert(isOwningHandle());
+    final long lowerBoundSliceHandle = iterateLowerBound(nativeHandle_);
+    if (lowerBoundSliceHandle != 0) {
+      // Disown the new slice - it's owned by the C++ side of the JNI boundary
+      // from the perspective of this method.
+      return new Slice(lowerBoundSliceHandle, false);
+    }
+    return null;
+  }
+
+  /**
+   * Defines the extent up to which the forward iterator
+   * can returns entries. Once the bound is reached,
+   * {@link RocksIterator#isValid()} will be false.
+   *
+   * The upper bound is exclusive i.e. the bound value is not a valid entry.
+   *
+   * If prefix_extractor is not null, the Seek target and iterate_upper_bound
+   * need to have the same prefix. This is because ordering is not guaranteed
+   * outside of prefix domain.
+   *
+   * Default: null
+   *
+   * @param iterateUpperBound Slice representing the upper bound
+   * @return the reference to the current ReadOptions.
+   */
+  public ReadOptions setIterateUpperBound(final AbstractSlice<?> iterateUpperBound) {
+    assert(isOwningHandle());
+    setIterateUpperBound(
+        nativeHandle_, iterateUpperBound == null ? 0 : iterateUpperBound.getNativeHandle());
+    // Hold onto a reference so it doesn't get garbage collected out from under us.
+    iterateUpperBoundSlice_ = iterateUpperBound;
+    return this;
+  }
+
+  /**
+   * Returns the largest key at which the forward
+   * iterator can return an entry.
+   *
+   * The upper bound is exclusive i.e. the bound value is not a valid entry.
+   *
+   * @return the largest key, or null if there is no upper bound defined.
+   */
+  public Slice iterateUpperBound() {
+    assert(isOwningHandle());
+    final long upperBoundSliceHandle = iterateUpperBound(nativeHandle_);
+    if (upperBoundSliceHandle != 0) {
+      // Disown the new slice - it's owned by the C++ side of the JNI boundary
+      // from the perspective of this method.
+      return new Slice(upperBoundSliceHandle, false);
+    }
+    return null;
+  }
+
+  /**
+   * A callback to determine whether relevant keys for this scan exist in a
+   * given table based on the table's properties. The callback is passed the
+   * properties of each table during iteration. If the callback returns false,
+   * the table will not be scanned. This option only affects Iterators and has
+   * no impact on point lookups.
+   *
+   * Default: null (every table will be scanned)
+   *
+   * @param tableFilter the table filter for the callback.
+   *
+   * @return the reference to the current ReadOptions.
+   */
+  public ReadOptions setTableFilter(final AbstractTableFilter tableFilter) {
+    assert(isOwningHandle());
+    setTableFilter(nativeHandle_, tableFilter.nativeHandle_);
+    return this;
+  }
+
+  /**
+   * When true, by default use total_order_seek = true, and RocksDB can
+   * selectively enable prefix seek mode if won't generate a different result
+   * from total_order_seek, based on seek key, and iterator upper bound.
+   * Not supported in ROCKSDB_LITE mode, in the way that even with value true
+   * prefix mode is not used.
+   * Default: false
+   *
+   * @return true if auto prefix mode is set.
+   *
+   */
+  public boolean autoPrefixMode() {
+    assert (isOwningHandle());
+    return autoPrefixMode(nativeHandle_);
+  }
+
+  /**
+   * When true, by default use total_order_seek = true, and RocksDB can
+   * selectively enable prefix seek mode if won't generate a different result
+   * from total_order_seek, based on seek key, and iterator upper bound.
+   * Not supported in ROCKSDB_LITE mode, in the way that even with value true
+   * prefix mode is not used.
+   * Default: false
+   * @param mode auto prefix mode
+   * @return the reference to the current ReadOptions.
+   */
+  public ReadOptions setAutoPrefixMode(final boolean mode) {
+    assert (isOwningHandle());
+    setAutoPrefixMode(nativeHandle_, mode);
+    return this;
+  }
+
+  /**
+   * Timestamp of operation. Read should return the latest data visible to the
+   * specified timestamp. All timestamps of the same database must be of the
+   * same length and format. The user is responsible for providing a customized
+   * compare function via Comparator to order &gt;key, timestamp&gt; tuples.
+   * For iterator, iter_start_ts is the lower bound (older) and timestamp
+   * serves as the upper bound. Versions of the same record that fall in
+   * the timestamp range will be returned. If iter_start_ts is nullptr,
+   * only the most recent version visible to timestamp is returned.
+   * The user-specified timestamp feature is still under active development,
+   * and the API is subject to change.
+   *
+   * Default: null
+   * @see #iterStartTs()
+   * @return Reference to timestamp or null if there is no timestamp defined.
+   */
+  public Slice timestamp() {
+    assert (isOwningHandle());
+    final long timestampSliceHandle = timestamp(nativeHandle_);
+    if (timestampSliceHandle != 0) {
+      return new Slice(timestampSliceHandle);
+    } else {
+      return null;
+    }
+  }
+
+  /**
+   * Timestamp of operation. Read should return the latest data visible to the
+   * specified timestamp. All timestamps of the same database must be of the
+   * same length and format. The user is responsible for providing a customized
+   * compare function via Comparator to order {@code <key, timestamp>} tuples.
+   * For iterator, {@code iter_start_ts} is the lower bound (older) and timestamp
+   * serves as the upper bound. Versions of the same record that fall in
+   * the timestamp range will be returned. If iter_start_ts is nullptr,
+   * only the most recent version visible to timestamp is returned.
+   * The user-specified timestamp feature is still under active development,
+   * and the API is subject to change.
+   *
+   * Default: null
+   * @see #setIterStartTs(AbstractSlice)
+   * @param timestamp Slice representing the timestamp
+   * @return the reference to the current ReadOptions.
+   */
+  public ReadOptions setTimestamp(final AbstractSlice<?> timestamp) {
+    assert (isOwningHandle());
+    setTimestamp(nativeHandle_, timestamp == null ? 0 : timestamp.getNativeHandle());
+    timestampSlice_ = timestamp;
+    return this;
+  }
+
+  /**
+   * Timestamp of operation. Read should return the latest data visible to the
+   * specified timestamp. All timestamps of the same database must be of the
+   * same length and format. The user is responsible for providing a customized
+   * compare function via Comparator to order {@code <key, timestamp>} tuples.
+   * For iterator, {@code iter_start_ts} is the lower bound (older) and timestamp
+   * serves as the upper bound. Versions of the same record that fall in
+   * the timestamp range will be returned. If iter_start_ts is nullptr,
+   * only the most recent version visible to timestamp is returned.
+   * The user-specified timestamp feature is still under active development,
+   * and the API is subject to change.
+   *
+   * Default: null
+   * @return Reference to lower bound timestamp or null if there is no lower bound timestamp
+   *     defined.
+   */
+  public Slice iterStartTs() {
+    assert (isOwningHandle());
+    final long iterStartTsHandle = iterStartTs(nativeHandle_);
+    if (iterStartTsHandle != 0) {
+      return new Slice(iterStartTsHandle);
+    } else {
+      return null;
+    }
+  }
+
+  /**
+   * Timestamp of operation. Read should return the latest data visible to the
+   * specified timestamp. All timestamps of the same database must be of the
+   * same length and format. The user is responsible for providing a customized
+   * compare function via Comparator to order {@code <key, timestamp>} tuples.
+   * For iterator, {@code iter_start_ts} is the lower bound (older) and timestamp
+   * serves as the upper bound. Versions of the same record that fall in
+   * the timestamp range will be returned. If iter_start_ts is nullptr,
+   * only the most recent version visible to timestamp is returned.
+   * The user-specified timestamp feature is still under active development,
+   * and the API is subject to change.
+   *
+   * Default: null
+   *
+   * @param iterStartTs Reference to lower bound timestamp or null if there is no lower bound
+   *     timestamp defined
+   * @return the reference to the current ReadOptions.
+   */
+  public ReadOptions setIterStartTs(final AbstractSlice<?> iterStartTs) {
+    assert (isOwningHandle());
+    setIterStartTs(nativeHandle_, iterStartTs == null ? 0 : iterStartTs.getNativeHandle());
+    iterStartTs_ = iterStartTs;
+    return this;
+  }
+
+  /**
+   * Deadline for completing an API call (Get/MultiGet/Seek/Next for now)
+   * in microseconds.
+   * It should be set to microseconds since epoch, i.e, {@code gettimeofday} or
+   * equivalent plus allowed duration in microseconds. The best way is to use
+   * {@code env->NowMicros() + some timeout}.
+   * This is best efforts. The call may exceed the deadline if there is IO
+   * involved and the file system doesn't support deadlines, or due to
+   * checking for deadline periodically rather than for every key if
+   * processing a batch
+   *
+   * @return deadline time in microseconds
+   */
+  public long deadline() {
+    assert (isOwningHandle());
+    return deadline(nativeHandle_);
+  }
+
+  /**
+   * Deadline for completing an API call (Get/MultiGet/Seek/Next for now)
+   * in microseconds.
+   * It should be set to microseconds since epoch, i.e, {@code gettimeofday} or
+   * equivalent plus allowed duration in microseconds. The best way is to use
+   * {@code env->NowMicros() + some timeout}.
+   * This is best efforts. The call may exceed the deadline if there is IO
+   * involved and the file system doesn't support deadlines, or due to
+   * checking for deadline periodically rather than for every key if
+   * processing a batch
+   *
+   * @param deadlineTime deadline time in microseconds.
+   * @return the reference to the current ReadOptions.
+   */
+  public ReadOptions setDeadline(final long deadlineTime) {
+    assert (isOwningHandle());
+    setDeadline(nativeHandle_, deadlineTime);
+    return this;
+  }
+
+  /**
+   * A timeout in microseconds to be passed to the underlying FileSystem for
+   * reads. As opposed to deadline, this determines the timeout for each
+   * individual file read request. If a MultiGet/Get/Seek/Next etc call
+   * results in multiple reads, each read can last up to io_timeout us.
+   * @return ioTimeout time in microseconds
+   */
+  public long ioTimeout() {
+    assert (isOwningHandle());
+    return ioTimeout(nativeHandle_);
+  }
+
+  /**
+   * A timeout in microseconds to be passed to the underlying FileSystem for
+   * reads. As opposed to deadline, this determines the timeout for each
+   * individual file read request. If a MultiGet/Get/Seek/Next etc call
+   * results in multiple reads, each read can last up to io_timeout us.
+   *
+   * @param ioTimeout time in microseconds.
+   * @return the reference to the current ReadOptions.
+   */
+  public ReadOptions setIoTimeout(final long ioTimeout) {
+    assert (isOwningHandle());
+    setIoTimeout(nativeHandle_, ioTimeout);
+    return this;
+  }
+
+  /**
+   * It limits the maximum cumulative value size of the keys in batch while
+   * reading through MultiGet. Once the cumulative value size exceeds this
+   * soft limit then all the remaining keys are returned with status Aborted.
+   *
+   * Default: {@code std::numeric_limits<uint64_t>::max()}
+   * @return actual valueSizeSofLimit
+   */
+  public long valueSizeSoftLimit() {
+    assert (isOwningHandle());
+    return valueSizeSoftLimit(nativeHandle_);
+  }
+
+  /**
+   * It limits the maximum cumulative value size of the keys in batch while
+   * reading through MultiGet. Once the cumulative value size exceeds this
+   * soft limit then all the remaining keys are returned with status Aborted.
+   *
+   * Default: {@code std::numeric_limits<uint64_t>::max()}
+   *
+   * @param valueSizeSoftLimit the maximum cumulative value size of the keys
+   * @return the reference to the current ReadOptions
+   */
+  public ReadOptions setValueSizeSoftLimit(final long valueSizeSoftLimit) {
+    assert (isOwningHandle());
+    setValueSizeSoftLimit(nativeHandle_, valueSizeSoftLimit);
+    return this;
+  }
+
+  // instance variables
+  // NOTE: If you add new member variables, please update the copy constructor above!
+  //
+  // Hold a reference to any iterate lower or upper bound that was set on this
+  // object until we're destroyed or it's overwritten. That way the caller can
+  // freely leave scope without us losing the Java Slice object, which during
+  // close() would also reap its associated rocksdb::Slice native object since
+  // it's possibly (likely) to be an owning handle.
+  private AbstractSlice<?> iterateLowerBoundSlice_;
+  private AbstractSlice<?> iterateUpperBoundSlice_;
+  private AbstractSlice<?> timestampSlice_;
+  private AbstractSlice<?> iterStartTs_;
+
   private native static long newReadOptions();
+  private native static long newReadOptions(final boolean verifyChecksums,
+    final boolean fillCache);
+  private native static long copyReadOptions(long handle);
+  @Override protected final native void disposeInternal(final long handle);
+
   private native boolean verifyChecksums(long handle);
   private native void setVerifyChecksums(long handle, boolean verifyChecksums);
   private native boolean fillCache(long handle);
@@ -388,10 +803,29 @@ public class ReadOptions extends RocksObject {
   private native long readaheadSize(final long handle);
   private native void setReadaheadSize(final long handle,
       final long readaheadSize);
+  private native long maxSkippableInternalKeys(final long handle);
+  private native void setMaxSkippableInternalKeys(final long handle,
+      final long maxSkippableInternalKeys);
   private native boolean ignoreRangeDeletions(final long handle);
   private native void setIgnoreRangeDeletions(final long handle,
       final boolean ignoreRangeDeletions);
-
-  @Override protected final native void disposeInternal(final long handle);
-
+  private native void setIterateUpperBound(final long handle,
+      final long upperBoundSliceHandle);
+  private native long iterateUpperBound(final long handle);
+  private native void setIterateLowerBound(final long handle,
+      final long lowerBoundSliceHandle);
+  private native long iterateLowerBound(final long handle);
+  private native void setTableFilter(final long handle, final long tableFilterHandle);
+  private native boolean autoPrefixMode(final long handle);
+  private native void setAutoPrefixMode(final long handle, final boolean autoPrefixMode);
+  private native long timestamp(final long handle);
+  private native void setTimestamp(final long handle, final long timestampSliceHandle);
+  private native long iterStartTs(final long handle);
+  private native void setIterStartTs(final long handle, final long iterStartTsHandle);
+  private native long deadline(final long handle);
+  private native void setDeadline(final long handle, final long deadlineTime);
+  private native long ioTimeout(final long handle);
+  private native void setIoTimeout(final long handle, final long ioTimeout);
+  private native long valueSizeSoftLimit(final long handle);
+  private native void setValueSizeSoftLimit(final long handle, final long softLimit);
 }

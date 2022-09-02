@@ -9,15 +9,15 @@
 
 #include "memtable/skiplist.h"
 #include <set>
+#include "memory/arena.h"
 #include "rocksdb/env.h"
-#include "util/arena.h"
+#include "test_util/testharness.h"
 #include "util/hash.h"
 #include "util/random.h"
-#include "util/testharness.h"
 
-namespace rocksdb {
+namespace ROCKSDB_NAMESPACE {
 
-typedef uint64_t Key;
+using Key = uint64_t;
 
 struct TestComparator {
   int operator()(const Key& a, const Key& b) const {
@@ -363,6 +363,7 @@ static void RunConcurrent(int run) {
       fprintf(stderr, "Run %d of %d\n", i, N);
     }
     TestState state(seed + 1);
+    Env::Default()->SetBackgroundThreads(1);
     Env::Default()->Schedule(ConcurrentReader, &state);
     state.Wait(TestState::RUNNING);
     for (int k = 0; k < kSize; k++) {
@@ -379,7 +380,7 @@ TEST_F(SkipTest, Concurrent3) { RunConcurrent(3); }
 TEST_F(SkipTest, Concurrent4) { RunConcurrent(4); }
 TEST_F(SkipTest, Concurrent5) { RunConcurrent(5); }
 
-}  // namespace rocksdb
+}  // namespace ROCKSDB_NAMESPACE
 
 int main(int argc, char** argv) {
   ::testing::InitGoogleTest(&argc, argv);

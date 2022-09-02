@@ -10,21 +10,16 @@
 #include "rocksdb/slice.h"
 #include "utilities/compaction_filters/remove_emptyvalue_compactionfilter.h"
 
-namespace rocksdb {
+namespace ROCKSDB_NAMESPACE {
 
-const char* RemoveEmptyValueCompactionFilter::Name() const {
-  return "RemoveEmptyValueCompactionFilter";
-}
-
-bool RemoveEmptyValueCompactionFilter::Filter(int level,
-    const Slice& key,
-    const Slice& existing_value,
-    std::string* new_value,
-    bool* value_changed) const {
-
+bool RemoveEmptyValueCompactionFilter::Filter(int /*level*/,
+                                              const Slice& /*key*/,
+                                              const Slice& existing_value,
+                                              std::string* /*new_value*/,
+                                              bool* /*value_changed*/) const {
   // remove kv pairs that have empty values
   return existing_value.empty();
 }
 
-}  // namespace rocksdb
+}  // namespace ROCKSDB_NAMESPACE
 #endif  // !ROCKSDB_LITE

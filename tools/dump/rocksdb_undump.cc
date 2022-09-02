@@ -18,9 +18,9 @@ int main() {
 
 #else
 
-#include <gflags/gflags.h>
 #include "rocksdb/convenience.h"
 #include "rocksdb/db_dump_tool.h"
+#include "util/gflags_compat.h"
 
 DEFINE_string(dump_location, "", "Path to the dump file that will be loaded");
 DEFINE_string(db_path, "", "Path to the db that we will undump the file into");
@@ -29,22 +29,22 @@ DEFINE_string(db_options, "",
               "Options string used to open the database that will be loaded");
 
 int main(int argc, char **argv) {
-  GFLAGS::ParseCommandLineFlags(&argc, &argv, true);
+  GFLAGS_NAMESPACE::ParseCommandLineFlags(&argc, &argv, true);
 
   if (FLAGS_db_path == "" || FLAGS_dump_location == "") {
     fprintf(stderr, "Please set --db_path and --dump_location\n");
     return 1;
   }
 
-  rocksdb::UndumpOptions undump_options;
+  ROCKSDB_NAMESPACE::UndumpOptions undump_options;
   undump_options.db_path = FLAGS_db_path;
   undump_options.dump_location = FLAGS_dump_location;
   undump_options.compact_db = FLAGS_compact;
 
-  rocksdb::Options db_options;
+  ROCKSDB_NAMESPACE::Options db_options;
   if (FLAGS_db_options != "") {
-    rocksdb::Options parsed_options;
-    rocksdb::Status s = rocksdb::GetOptionsFromString(
+    ROCKSDB_NAMESPACE::Options parsed_options;
+    ROCKSDB_NAMESPACE::Status s = ROCKSDB_NAMESPACE::GetOptionsFromString(
         db_options, FLAGS_db_options, &parsed_options);
     if (!s.ok()) {
       fprintf(stderr, "Cannot parse provided db_options\n");
@@ -53,7 +53,7 @@ int main(int argc, char **argv) {
     db_options = parsed_options;
   }
 
-  rocksdb::DbUndumpTool tool;
+  ROCKSDB_NAMESPACE::DbUndumpTool tool;
   if (!tool.Run(undump_options, db_options)) {
     return 1;
   }

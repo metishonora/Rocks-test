@@ -10,39 +10,54 @@
 // This file is a portable substitute for sys/time.h which does not exist on
 // Windows
 
-#ifndef STORAGE_LEVELDB_PORT_SYS_TIME_H_
-#define STORAGE_LEVELDB_PORT_SYS_TIME_H_
+#pragma once
 
-#if defined(OS_WIN) && defined(_MSC_VER)
+#include "rocksdb/rocksdb_namespace.h"
+
+#if defined(OS_WIN) && (defined(_MSC_VER) || defined(__MINGW32__))
 
 #include <time.h>
 
-namespace rocksdb {
+namespace ROCKSDB_NAMESPACE {
 
 namespace port {
 
-// Avoid including winsock2.h for this definition
-typedef struct timeval {
+struct TimeVal {
   long tv_sec;
   long tv_usec;
-} timeval;
+};
 
-void gettimeofday(struct timeval* tv, struct timezone* tz);
+void GetTimeOfDay(TimeVal* tv, struct timezone* tz);
 
-inline struct tm* localtime_r(const time_t* timep, struct tm* result) {
+inline struct tm* LocalTimeR(const time_t* timep, struct tm* result) {
   errno_t ret = localtime_s(result, timep);
   return (ret == 0) ? result : NULL;
 }
-}
 
-using port::timeval;
-using port::gettimeofday;
-using port::localtime_r;
-}
+}  // namespace port
+
+}  // namespace ROCKSDB_NAMESPACE
 
 #else
 #include <time.h>
 #include <sys/time.h>
-#endif
 
-#endif  // STORAGE_LEVELDB_PORT_SYS_TIME_H_
+namespace ROCKSDB_NAMESPACE {
+
+namespace port {
+
+using TimeVal = struct timeval;
+
+inline void GetTimeOfDay(TimeVal* tv, struct timezone* tz) {
+  gettimeofday(tv, tz);
+}
+
+inline struct tm* LocalTimeR(const time_t* timep, struct tm* result) {
+  return localtime_r(timep, result);
+}
+
+}  // namespace port
+
+}  // namespace ROCKSDB_NAMESPACE
+
+#endif

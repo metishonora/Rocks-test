@@ -1,4 +1,5 @@
 make_config.mk
+rocksdb.pc
 
 *.a
 *.arc
@@ -7,6 +8,7 @@ make_config.mk
 *.gcda
 *.gcno
 *.o
+*.o.tmp
 *.so
 *.so.*
 *_test
@@ -24,6 +26,7 @@ make_config.mk
 *.vcxproj.filters
 *.sln
 *.cmake
+.watchmanconfig
 CMakeCache.txt
 CMakeFiles/
 build/
@@ -32,6 +35,8 @@ ldb
 manifest_dump
 sst_dump
 blob_dump
+block_cache_trace_analyzer
+tools/block_cache_analyzer/*.pyc
 column_aware_encoding_exp
 util/build_version.cc
 build_tools/VALGRIND_LOGS/
@@ -39,13 +44,18 @@ coverage/COVERAGE_REPORT
 .gdbhistory
 .gdb_history
 package/
-.phutil_module_cache
 unity.a
 tags
 etags
 rocksdb_dump
 rocksdb_undump
 db_test2
+trace_analyzer
+block_cache_trace_analyzer
+io_tracer_parser
+.DS_Store
+.vs
+.vscode
 
 java/out
 java/target
@@ -73,3 +83,14 @@ tp2/
 fbcode/
 fbcode
 buckifier/*.pyc
+buckifier/__pycache__
+
+compile_commands.json
+clang-format-diff.py
+.py3/
+
+fuzz/proto/gen/
+fuzz/crash-*
+
+cmake-build-*
+third-party/folly/

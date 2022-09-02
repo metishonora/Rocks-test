@@ -18,13 +18,20 @@
 #include "util/autovector.h"
 #include "port/port.h"
 
-namespace rocksdb {
+namespace ROCKSDB_NAMESPACE {
 
 // Cleanup function that will be called for a stored thread local
 // pointer (if not NULL) when one of the following happens:
 // (1) a thread terminates
 // (2) a ThreadLocalPtr is destroyed
-typedef void (*UnrefHandler)(void* ptr);
+//
+// Warning: this function is called while holding a global mutex. The same mutex
+// is used (at least in some cases) by most methods of ThreadLocalPtr, and it's
+// shared across all instances of ThreadLocalPtr. Thereforere extra care
+// is needed to avoid deadlocks. In particular, the handler shouldn't lock any
+// mutexes and shouldn't call any methods of any ThreadLocalPtr instances,
+// unless you know what you're doing.
+using UnrefHandler = void (*)(void* ptr);
 
 // ThreadLocalPtr stores only values of pointer type.  Different from
 // the usual thread-local-storage, ThreadLocalPtr has the ability to
@@ -37,6 +44,9 @@ typedef void (*UnrefHandler)(void* ptr);
 class ThreadLocalPtr {
  public:
   explicit ThreadLocalPtr(UnrefHandler handler = nullptr);
+
+  ThreadLocalPtr(const ThreadLocalPtr&) = delete;
+  ThreadLocalPtr& operator=(const ThreadLocalPtr&) = delete;
 
   ~ThreadLocalPtr();
 
@@ -59,7 +69,7 @@ class ThreadLocalPtr {
   // data for all existing threads
   void Scrape(autovector<void*>* ptrs, void* const replacement);
 
-  typedef std::function<void(void*, void*)> FoldFunc;
+  using FoldFunc = std::function<void(void*, void*)>;
   // Update res by applying func on each thread-local value. Holds a lock that
   // prevents unref handler from running during this call, but clients must
   // still provide external synchronization since the owning thread can
@@ -88,4 +98,4 @@ private:
   const uint32_t id_;
 };
 
-}  // namespace rocksdb
+}  // namespace ROCKSDB_NAMESPACE

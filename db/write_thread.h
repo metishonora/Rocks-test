@@ -5,15 +5,18 @@
 
 #pragma once
 
-#include <assert.h>
-#include <stdint.h>
 #include <atomic>
+#include <cassert>
 #include <chrono>
 #include <condition_variable>
+#include <cstdint>
 #include <mutex>
 #include <type_traits>
 #include <vector>
 
+#include "db/dbformat.h"
+#include "db/post_memtable_callback.h"
+#include "db/pre_release_callback.h"
 #include "db/write_callback.h"
 #include "monitoring/instrumented_mutex.h"
 #include "rocksdb/options.h"
@@ -22,7 +25,7 @@
 #include "rocksdb/write_batch.h"
 #include "util/autovector.h"
 
-namespace rocksdb {
+namespace ROCKSDB_NAMESPACE {
 
 class WriteThread {
  public:
@@ -34,7 +37,7 @@ class WriteThread {
     // non-parallel informs a follower that its writes have been committed
     // (-> STATE_COMPLETED), or when a leader that has chosen to perform
     // updates in parallel and needs this Writer to apply its batch (->
-    // STATE_PARALLEL_FOLLOWER).
+    // STATE_PARALLEL_MEMTABLE_WRITER).
     STATE_INIT = 1,
 
     // The state used to inform a waiting Writer that it has become the
@@ -55,7 +58,7 @@ class WriteThread {
 
     // The state used to inform a waiting writer that it has become a
     // parallel memtable writer. It can be the group leader who launch the
-    // praallel writer group, or one of the followers. The writer should then
+    // parallel writer group, or one of the followers. The writer should then
     // apply its batch to the memtable concurrently and call
     // CompleteParallelMemTableWriter.
     STATE_PARALLEL_MEMTABLE_WRITER = 8,
@@ -115,7 +118,12 @@ class WriteThread {
     bool sync;
     bool no_slowdown;
     bool disable_wal;
+    Env::IOPriority rate_limiter_priority;
     bool disable_memtable;
+    size_t batch_cnt;  // if non-zero, number of sub-batches in the write batch
+    size_t protection_bytes_per_key;
+    PreReleaseCallback* pre_release_callback;
+    PostMemTableCallback* post_memtable_callback;
     uint64_t log_used;  // log number that this batch was inserted into
     uint64_t log_ref;   // log number that memtable insert should reference
     WriteCallback* callback;
@@ -123,8 +131,9 @@ class WriteThread {
     std::atomic<uint8_t> state;  // write under StateMutex() or pre-link
     WriteGroup* write_group;
     SequenceNumber sequence;  // the sequence number to use for the first key
-    Status status;            // status of memtable inserter
-    Status callback_status;   // status returned by callback->Callback()
+    Status status;
+    Status callback_status;  // status returned by callback->Callback()
+
     std::aligned_storage<sizeof(std::mutex)>::type state_mutex_bytes;
     std::aligned_storage<sizeof(std::condition_variable)>::type state_cv_bytes;
     Writer* link_older;  // read/write only before linking, or as leader
@@ -135,29 +144,44 @@ class WriteThread {
           sync(false),
           no_slowdown(false),
           disable_wal(false),
+          rate_limiter_priority(Env::IOPriority::IO_TOTAL),
           disable_memtable(false),
+          batch_cnt(0),
+          protection_bytes_per_key(0),
+          pre_release_callback(nullptr),
+          post_memtable_callback(nullptr),
           log_used(0),
           log_ref(0),
           callback(nullptr),
           made_waitable(false),
           state(STATE_INIT),
           write_group(nullptr),
+          sequence(kMaxSequenceNumber),
           link_older(nullptr),
           link_newer(nullptr) {}
 
     Writer(const WriteOptions& write_options, WriteBatch* _batch,
-           WriteCallback* _callback, uint64_t _log_ref, bool _disable_memtable)
+           WriteCallback* _callback, uint64_t _log_ref, bool _disable_memtable,
+           size_t _batch_cnt = 0,
+           PreReleaseCallback* _pre_release_callback = nullptr,
+           PostMemTableCallback* _post_memtable_callback = nullptr)
         : batch(_batch),
           sync(write_options.sync),
           no_slowdown(write_options.no_slowdown),
           disable_wal(write_options.disableWAL),
+          rate_limiter_priority(write_options.rate_limiter_priority),
           disable_memtable(_disable_memtable),
+          batch_cnt(_batch_cnt),
+          protection_bytes_per_key(_batch->GetProtectionBytesPerKey()),
+          pre_release_callback(_pre_release_callback),
+          post_memtable_callback(_post_memtable_callback),
           log_used(0),
           log_ref(_log_ref),
           callback(_callback),
           made_waitable(false),
           state(STATE_INIT),
           write_group(nullptr),
+          sequence(kMaxSequenceNumber),
           link_older(nullptr),
           link_newer(nullptr) {}
 
@@ -166,6 +190,8 @@ class WriteThread {
         StateMutex().~mutex();
         StateCV().~condition_variable();
       }
+      status.PermitUncheckedError();
+      callback_status.PermitUncheckedError();
     }
 
     bool CheckCallback(DB* db) {
@@ -228,7 +254,7 @@ class WriteThread {
     std::condition_variable& StateCV() {
       assert(made_waitable);
       return *static_cast<std::condition_variable*>(
-                 static_cast<void*>(&state_cv_bytes));
+          static_cast<void*>(&state_cv_bytes));
     }
   };
 
@@ -255,7 +281,7 @@ class WriteThread {
   // STATE_GROUP_LEADER.  If w has been made part of a sequential batch
   // group and the leader has performed the write, returns STATE_DONE.
   // If w has been made part of a parallel batch group and is responsible
-  // for updating the memtable, returns STATE_PARALLEL_FOLLOWER.
+  // for updating the memtable, returns STATE_PARALLEL_MEMTABLE_WRITER.
   //
   // The db mutex SHOULD NOT be held when calling this function, because
   // it will block.
@@ -276,7 +302,7 @@ class WriteThread {
   //
   // WriteGroup* write_group: the write group
   // Status status:           Status of write operation
-  void ExitAsBatchGroupLeader(WriteGroup& write_group, Status status);
+  void ExitAsBatchGroupLeader(WriteGroup& write_group, Status& status);
 
   // Exit batch group on behalf of batch group leader.
   void ExitAsBatchGroupFollower(Writer* w);
@@ -292,8 +318,8 @@ class WriteThread {
   // the next leader if needed.
   void ExitAsMemTableWriter(Writer* self, WriteGroup& write_group);
 
-  // Causes JoinBatchGroup to return STATE_PARALLEL_FOLLOWER for all of the
-  // non-leader members of this write batch group.  Sets Writer::sequence
+  // Causes JoinBatchGroup to return STATE_PARALLEL_MEMTABLE_WRITER for all of
+  // the non-leader members of this write batch group.  Sets Writer::sequence
   // before waking them up.
   //
   // WriteGroup* write_group: Extra state used to coordinate the parallel add
@@ -329,6 +355,13 @@ class WriteThread {
     return last_sequence_;
   }
 
+  // Insert a dummy writer at the tail of the write queue to indicate a write
+  // stall, and fail any writers in the queue with no_slowdown set to true
+  void BeginWriteStall();
+
+  // Remove the dummy writer and wake up waiting writers
+  void EndWriteStall();
+
  private:
   // See AwaitState.
   const uint64_t max_yield_usec_;
@@ -339,6 +372,11 @@ class WriteThread {
 
   // Enable pipelined write to WAL and memtable.
   const bool enable_pipelined_write_;
+
+  // The maximum limit of number of bytes that are written in a single batch
+  // of WAL or memtable write. It is followed when the leader write size
+  // is larger than 1/8 of this limit.
+  const uint64_t max_write_batch_group_size_bytes;
 
   // Points to the newest pending writer. Only leader can remove
   // elements, adding can be done lock-free by anybody.
@@ -351,6 +389,17 @@ class WriteThread {
   // The last sequence that have been consumed by a writer. The sequence
   // is not necessary visible to reads because the writer can be ongoing.
   SequenceNumber last_sequence_;
+
+  // A dummy writer to indicate a write stall condition. This will be inserted
+  // at the tail of the writer queue by the leader, so newer writers can just
+  // check for this and bail
+  Writer write_stall_dummy_;
+
+  // Mutex and condvar for writers to block on a write stall. During a write
+  // stall, writers with no_slowdown set to false will wait on this rather
+  // on the writer queue
+  port::Mutex stall_mu_;
+  port::CondVar stall_cv_;
 
   // Waits for w->state & goal_mask using w->StateMutex().  Returns
   // the state that satisfies goal_mask.
@@ -388,4 +437,4 @@ class WriteThread {
   void CompleteFollower(Writer* w, WriteGroup& write_group);
 };
 
-}  // namespace rocksdb
+}  // namespace ROCKSDB_NAMESPACE

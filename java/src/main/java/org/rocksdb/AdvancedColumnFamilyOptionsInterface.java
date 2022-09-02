@@ -13,9 +13,8 @@ import java.util.List;
  *
  * Taken from include/rocksdb/advanced_options.h
  */
-public interface AdvancedColumnFamilyOptionsInterface
-    <T extends AdvancedColumnFamilyOptionsInterface> {
-
+public interface AdvancedColumnFamilyOptionsInterface<
+    T extends AdvancedColumnFamilyOptionsInterface<T>> {
   /**
    * The minimum number of write buffers that will be merged together
    * before writing to storage.  If set to 1, then
@@ -255,7 +254,8 @@ public interface AdvancedColumnFamilyOptionsInterface
    * levels extra size. After the data accumulates more so that we need to
    * move the base level to the third last one, and so on.</p>
    *
-   * <h2>Example</h2>
+   * <p><b>Example</b></p>
+   *
    * <p>For example, assume {@code max_bytes_for_level_multiplier=10},
    * {@code num_levels=6}, and {@code max_bytes_for_level_base=10MB}.</p>
    *
@@ -301,7 +301,7 @@ public interface AdvancedColumnFamilyOptionsInterface
    * @return the reference to the current options.
    */
   @Experimental("Turning this feature on or off for an existing DB can cause" +
-      "unexpected LSM tree structure so it's not recommended")
+      " unexpected LSM tree structure so it's not recommended")
   T setLevelCompactionDynamicLevelBytes(
       boolean enableLevelCompactionDynamicLevelBytes);
 
@@ -441,7 +441,7 @@ public interface AdvancedColumnFamilyOptionsInterface
   boolean optimizeFiltersForHits();
 
   /**
-   * In debug mode, RocksDB run consistency checks on the LSM everytime the LSM
+   * In debug mode, RocksDB run consistency checks on the LSM every time the LSM
    * change (Flush, Compaction, AddFile). These checks are disabled in release
    * mode, use this option to enable them in release mode as well.
    *
@@ -455,7 +455,7 @@ public interface AdvancedColumnFamilyOptionsInterface
       boolean forceConsistencyChecks);
 
   /**
-   * In debug mode, RocksDB run consistency checks on the LSM everytime the LSM
+   * In debug mode, RocksDB run consistency checks on the LSM every time the LSM
    * change (Flush, Compaction, AddFile). These checks are disabled in release
    * mode.
    *

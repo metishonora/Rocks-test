@@ -4,8 +4,8 @@ RocksDBLite is a project focused on mobile use cases, which don't need a lot of 
 
 Some examples of the features disabled by ROCKSDB_LITE:
 * compiled-in support for LDB tool
-* No backupable DB
-* No support for replication (which we provide in form of TrasactionalIterator)
+* No backup engine
+* No support for replication (which we provide in form of TransactionalIterator)
 * No advanced monitoring tools
 * No special-purpose memtables that are highly optimized for specific use cases
 * No Transactions

@@ -4,7 +4,7 @@
 //  (found in the LICENSE.Apache file in the root directory).
 //
 // This file implements the "bridge" between Java and C++ for
-// rocksdb::CompactionFilter.
+// ROCKSDB_NAMESPACE::CompactionFilter.
 
 #include <jni.h>
 
@@ -18,9 +18,10 @@
  * Method:    disposeInternal
  * Signature: (J)V
  */
-void Java_org_rocksdb_AbstractCompactionFilter_disposeInternal(
-    JNIEnv* env, jobject jobj, jlong handle) {
-  auto* cf = reinterpret_cast<rocksdb::CompactionFilter*>(handle);
+void Java_org_rocksdb_AbstractCompactionFilter_disposeInternal(JNIEnv* /*env*/,
+                                                               jobject /*jobj*/,
+                                                               jlong handle) {
+  auto* cf = reinterpret_cast<ROCKSDB_NAMESPACE::CompactionFilter*>(handle);
   assert(cf != nullptr);
   delete cf;
 }

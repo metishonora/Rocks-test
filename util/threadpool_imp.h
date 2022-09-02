@@ -14,8 +14,7 @@
 #include <memory>
 #include <functional>
 
-namespace rocksdb {
-
+namespace ROCKSDB_NAMESPACE {
 
 class ThreadPoolImpl : public ThreadPool {
  public:
@@ -46,9 +45,13 @@ class ThreadPoolImpl : public ThreadPool {
   // start yet
   void WaitForJobsAndJoinAllThreads() override;
 
-  // Make threads to run at a lower kernel priority
+  // Make threads to run at a lower kernel IO priority
   // Currently only has effect on Linux
   void LowerIOPriority();
+
+  // Make threads to run at a lower kernel CPU priority
+  // Currently only has effect on Linux
+  void LowerCPUPriority(CpuPriority pri);
 
   // Ensure there is at aleast num threads in the pool
   // but do not kill threads if there are more
@@ -85,6 +88,14 @@ class ThreadPoolImpl : public ThreadPool {
   // Set the thread priority.
   void SetThreadPriority(Env::Priority priority);
 
+  // Reserve a specific number of threads, prevent them from running other
+  // functions The number of reserved threads could be fewer than the desired
+  // one
+  int ReserveThreads(int threads_to_be_reserved) override;
+
+  // Release a specific number of threads
+  int ReleaseThreads(int threads_to_be_released) override;
+
   static void PthreadCall(const char* label, int result);
 
   struct Impl;
@@ -106,4 +117,4 @@ class ThreadPoolImpl : public ThreadPool {
    std::unique_ptr<Impl>   impl_;
 };
 
-}  // namespace rocksdb
+}  // namespace ROCKSDB_NAMESPACE

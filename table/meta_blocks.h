@@ -11,14 +11,16 @@
 
 #include "db/builder.h"
 #include "db/table_properties_collector.h"
-#include "util/kv_map.h"
 #include "rocksdb/comparator.h"
+#include "rocksdb/memory_allocator.h"
 #include "rocksdb/options.h"
 #include "rocksdb/slice.h"
-#include "table/block_builder.h"
+#include "table/block_based/block_builder.h"
+#include "table/block_based/block_type.h"
 #include "table/format.h"
+#include "util/kv_map.h"
 
-namespace rocksdb {
+namespace ROCKSDB_NAMESPACE {
 
 class BlockBuilder;
 class BlockHandle;
@@ -27,7 +29,12 @@ class Footer;
 class Logger;
 class RandomAccessFile;
 struct TableProperties;
-class InternalIterator;
+
+// Meta block names for metaindex
+extern const std::string kPropertiesBlockName;
+extern const std::string kPropertiesBlockOldName;
+extern const std::string kCompressionDictBlockName;
+extern const std::string kRangeDelBlockName;
 
 class MetaIndexBuilder {
  public:
@@ -69,8 +76,8 @@ class PropertyBlockBuilder {
 
 // Were we encounter any error occurs during user-defined statistics collection,
 // we'll write the warning message to info log.
-void LogPropertiesCollectionError(
-    Logger* info_log, const std::string& method, const std::string& name);
+void LogPropertiesCollectionError(Logger* info_log, const std::string& method,
+                                  const std::string& name);
 
 // Utility functions help table builder to trigger batch events for user
 // defined property collectors.
@@ -83,48 +90,79 @@ bool NotifyCollectTableCollectorsOnAdd(
     const std::vector<std::unique_ptr<IntTblPropCollector>>& collectors,
     Logger* info_log);
 
-// NotifyCollectTableCollectorsOnAdd() triggers the `Finish` event for all
+void NotifyCollectTableCollectorsOnBlockAdd(
+    const std::vector<std::unique_ptr<IntTblPropCollector>>& collectors,
+    uint64_t block_raw_bytes, uint64_t block_compressed_bytes_fast,
+    uint64_t block_compressed_bytes_slow);
+
+// NotifyCollectTableCollectorsOnFinish() triggers the `Finish` event for all
 // property collectors. The collected properties will be added to `builder`.
 bool NotifyCollectTableCollectorsOnFinish(
     const std::vector<std::unique_ptr<IntTblPropCollector>>& collectors,
     Logger* info_log, PropertyBlockBuilder* builder);
 
-// Read the properties from the table.
+// Read table properties from a file using known BlockHandle.
 // @returns a status to indicate if the operation succeeded. On success,
 //          *table_properties will point to a heap-allocated TableProperties
 //          object, otherwise value of `table_properties` will not be modified.
-Status ReadProperties(const Slice& handle_value, RandomAccessFileReader* file,
-                      const Footer& footer, const ImmutableCFOptions &ioptions,
-                      TableProperties** table_properties);
+Status ReadTablePropertiesHelper(
+    const ReadOptions& ro, const BlockHandle& handle,
+    RandomAccessFileReader* file, FilePrefetchBuffer* prefetch_buffer,
+    const Footer& footer, const ImmutableOptions& ioptions,
+    std::unique_ptr<TableProperties>* table_properties,
+    MemoryAllocator* memory_allocator = nullptr);
 
-// Directly read the properties from the properties block of a plain table.
+// Read table properties from the properties block of a plain table.
 // @returns a status to indicate if the operation succeeded. On success,
 //          *table_properties will point to a heap-allocated TableProperties
 //          object, otherwise value of `table_properties` will not be modified.
 Status ReadTableProperties(RandomAccessFileReader* file, uint64_t file_size,
                            uint64_t table_magic_number,
-                           const ImmutableCFOptions &ioptions,
-                           TableProperties** properties);
+                           const ImmutableOptions& ioptions,
+                           std::unique_ptr<TableProperties>* properties,
+                           MemoryAllocator* memory_allocator = nullptr,
+                           FilePrefetchBuffer* prefetch_buffer = nullptr);
 
-// Find the meta block from the meta index block.
+// Find the meta block from the meta index block. Returns OK and
+// block_handle->IsNull() if not found.
+Status FindOptionalMetaBlock(InternalIterator* meta_index_iter,
+                             const std::string& meta_block_name,
+                             BlockHandle* block_handle);
+
+// Find the meta block from the meta index block. Returns Corruption if not
+// found.
 Status FindMetaBlock(InternalIterator* meta_index_iter,
                      const std::string& meta_block_name,
                      BlockHandle* block_handle);
 
 // Find the meta block
-Status FindMetaBlock(RandomAccessFileReader* file, uint64_t file_size,
-                     uint64_t table_magic_number,
-                     const ImmutableCFOptions &ioptions,
-                     const std::string& meta_block_name,
-                     BlockHandle* block_handle);
+Status FindMetaBlockInFile(RandomAccessFileReader* file, uint64_t file_size,
+                           uint64_t table_magic_number,
+                           const ImmutableOptions& ioptions,
+                           const std::string& meta_block_name,
+                           BlockHandle* block_handle,
+                           MemoryAllocator* memory_allocator = nullptr,
+                           FilePrefetchBuffer* prefetch_buffer = nullptr,
+                           Footer* footer_out = nullptr);
+
+// Read meta block contents
+Status ReadMetaIndexBlockInFile(RandomAccessFileReader* file,
+                                uint64_t file_size, uint64_t table_magic_number,
+                                const ImmutableOptions& ioptions,
+                                BlockContents* block_contents,
+                                MemoryAllocator* memory_allocator = nullptr,
+                                FilePrefetchBuffer* prefetch_buffer = nullptr,
+                                Footer* footer_out = nullptr);
 
 // Read the specified meta block with name meta_block_name
 // from `file` and initialize `contents` with contents of this block.
 // Return Status::OK in case of success.
-Status ReadMetaBlock(RandomAccessFileReader* file, uint64_t file_size,
+Status ReadMetaBlock(RandomAccessFileReader* file,
+                     FilePrefetchBuffer* prefetch_buffer, uint64_t file_size,
                      uint64_t table_magic_number,
-                     const ImmutableCFOptions &ioptions,
-                     const std::string& meta_block_name,
-                     BlockContents* contents);
+                     const ImmutableOptions& ioptions,
+                     const std::string& meta_block_name, BlockType block_type,
+                     BlockContents* contents,
+                     MemoryAllocator* memory_allocator = nullptr);
 
-}  // namespace rocksdb
+}  // namespace ROCKSDB_NAMESPACE

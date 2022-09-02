@@ -8,12 +8,13 @@
 #include <memory>
 #include <string>
 #include <utility>
+
+#include "db/blob/blob_log_format.h"
+#include "file/random_access_file_reader.h"
 #include "rocksdb/slice.h"
 #include "rocksdb/status.h"
-#include "util/file_reader_writer.h"
-#include "utilities/blob_db/blob_log_format.h"
 
-namespace rocksdb {
+namespace ROCKSDB_NAMESPACE {
 namespace blob_db {
 
 class BlobDumpTool {
@@ -27,19 +28,24 @@ class BlobDumpTool {
 
   BlobDumpTool();
 
-  Status Run(const std::string& filename, DisplayType key_type,
-             DisplayType blob_type);
+  Status Run(const std::string& filename, DisplayType show_key,
+             DisplayType show_blob, DisplayType show_uncompressed_blob,
+             bool show_summary);
 
  private:
   std::unique_ptr<RandomAccessFileReader> reader_;
-  std::unique_ptr<char> buffer_;
+  std::unique_ptr<char[]> buffer_;
   size_t buffer_size_;
 
   Status Read(uint64_t offset, size_t size, Slice* result);
-  Status DumpBlobLogHeader(uint64_t* offset);
+  Status DumpBlobLogHeader(uint64_t* offset, CompressionType* compression);
   Status DumpBlobLogFooter(uint64_t file_size, uint64_t* footer_offset);
   Status DumpRecord(DisplayType show_key, DisplayType show_blob,
-                    uint64_t* offset);
+                    DisplayType show_uncompressed_blob, bool show_summary,
+                    CompressionType compression, uint64_t* offset,
+                    uint64_t* total_records, uint64_t* total_key_size,
+                    uint64_t* total_blob_size,
+                    uint64_t* total_uncompressed_blob_size);
   void DumpSlice(const Slice s, DisplayType type);
 
   template <class T>
@@ -47,6 +53,6 @@ class BlobDumpTool {
 };
 
 }  // namespace blob_db
-}  // namespace rocksdb
+}  // namespace ROCKSDB_NAMESPACE
 
 #endif  // ROCKSDB_LITE

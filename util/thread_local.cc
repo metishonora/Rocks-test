@@ -12,7 +12,7 @@
 #include "port/likely.h"
 #include <stdlib.h>
 
-namespace rocksdb {
+namespace ROCKSDB_NAMESPACE {
 
 struct Entry {
   Entry() : ptr(nullptr) {}
@@ -29,7 +29,7 @@ class StaticMeta;
 // global StaticMeta singleton. So if we instantiated 3 ThreadLocalPtr
 // instances, each thread will have a ThreadData with a vector of size 3:
 //     ---------------------------------------------------
-//     |          | instance 1 | instance 2 | instnace 3 |
+//     |          | instance 1 | instance 2 | instance 3 |
 //     ---------------------------------------------------
 //     | thread 1 |    void*   |    void*   |    void*   | <- ThreadData
 //     ---------------------------------------------------
@@ -38,7 +38,11 @@ class StaticMeta;
 //     | thread 3 |    void*   |    void*   |    void*   | <- ThreadData
 //     ---------------------------------------------------
 struct ThreadData {
-  explicit ThreadData(ThreadLocalPtr::StaticMeta* _inst) : entries(), inst(_inst) {}
+  explicit ThreadData(ThreadLocalPtr::StaticMeta* _inst)
+    : entries(),
+      next(nullptr),
+      prev(nullptr),
+      inst(_inst) {}
   std::vector<Entry> entries;
   ThreadData* next;
   ThreadData* prev;
@@ -136,20 +140,15 @@ private:
   // The private mutex.  Developers should always use Mutex() instead of
   // using this variable directly.
   port::Mutex mutex_;
-#ifdef ROCKSDB_SUPPORT_THREAD_LOCAL
   // Thread local storage
-  static __thread ThreadData* tls_;
-#endif
+  static thread_local ThreadData* tls_;
 
   // Used to make thread exit trigger possible if !defined(OS_MACOSX).
   // Otherwise, used to retrieve thread data.
   pthread_key_t pthread_key_;
 };
 
-
-#ifdef ROCKSDB_SUPPORT_THREAD_LOCAL
-__thread ThreadData* ThreadLocalPtr::StaticMeta::tls_ = nullptr;
-#endif
+thread_local ThreadData* ThreadLocalPtr::StaticMeta::tls_ = nullptr;
 
 // Windows doesn't support a per-thread destructor with its
 // TLS primitives.  So, we build it manually by inserting a
@@ -174,14 +173,15 @@ namespace wintlscleanup {
 
 // This is set to OnThreadExit in StaticMeta singleton constructor
 UnrefHandler thread_local_inclass_routine = nullptr;
-pthread_key_t thread_local_key = -1;
+pthread_key_t thread_local_key = pthread_key_t (-1);
 
 // Static callback function to call with each thread termination.
 void NTAPI WinOnThreadExit(PVOID module, DWORD reason, PVOID reserved) {
   // We decided to punt on PROCESS_EXIT
   if (DLL_THREAD_DETACH == reason) {
-    if (thread_local_key != pthread_key_t(-1) && thread_local_inclass_routine != nullptr) {
-      void* tls = pthread_getspecific(thread_local_key);
+    if (thread_local_key != pthread_key_t(-1) &&
+        thread_local_inclass_routine != nullptr) {
+      void* tls = TlsGetValue(thread_local_key);
       if (tls != nullptr) {
         thread_local_inclass_routine(tls);
       }
@@ -199,7 +199,7 @@ extern "C" {
 // The linker must not discard thread_callback_on_exit.  (We force a reference
 // to this variable with a linker /include:symbol pragma to ensure that.) If
 // this variable is discarded, the OnThreadExit function will never be called.
-#ifdef _WIN64
+#ifndef _X86_
 
 // .CRT section is merged with .rdata on x64 so it must be constant data.
 #pragma const_seg(".CRT$XLB")
@@ -214,7 +214,7 @@ const PIMAGE_TLS_CALLBACK p_thread_callback_on_exit =
 #pragma comment(linker, "/include:_tls_used")
 #pragma comment(linker, "/include:p_thread_callback_on_exit")
 
-#else  // _WIN64
+#else  // _X86_
 
 #pragma data_seg(".CRT$XLB")
 PIMAGE_TLS_CALLBACK p_thread_callback_on_exit = wintlscleanup::WinOnThreadExit;
@@ -224,7 +224,7 @@ PIMAGE_TLS_CALLBACK p_thread_callback_on_exit = wintlscleanup::WinOnThreadExit;
 #pragma comment(linker, "/INCLUDE:__tls_used")
 #pragma comment(linker, "/INCLUDE:_p_thread_callback_on_exit")
 
-#endif  // _WIN64
+#endif  // _X86_
 
 #else
 // https://github.com/couchbase/gperftools/blob/master/src/windows/port.cc
@@ -258,13 +258,10 @@ ThreadLocalPtr::StaticMeta* ThreadLocalPtr::Instance() {
   // the following variable will go first, then OnThreadExit, therefore causing
   // invalid access.
   //
-  // The above problem can be solved by using thread_local to store tls_ instead
-  // of using __thread.  The major difference between thread_local and __thread
-  // is that thread_local supports dynamic construction and destruction of
+  // The above problem can be solved by using thread_local to store tls_.
+  // thread_local supports dynamic construction and destruction of
   // non-primitive typed variables.  As a result, we can guarantee the
   // destruction order even when the main thread dies before any child threads.
-  // However, thread_local is not supported in all compilers that accept -std=c++11
-  // (e.g., eg Mac with XCode < 8. XCode 8+ supports thread_local).
   static ThreadLocalPtr::StaticMeta* inst = new ThreadLocalPtr::StaticMeta();
   return inst;
 }
@@ -300,7 +297,10 @@ void ThreadLocalPtr::StaticMeta::OnThreadExit(void* ptr) {
   delete tls;
 }
 
-ThreadLocalPtr::StaticMeta::StaticMeta() : next_instance_id_(0), head_(this) {
+ThreadLocalPtr::StaticMeta::StaticMeta()
+  : next_instance_id_(0),
+    head_(this),
+    pthread_key_(0) {
   if (pthread_key_create(&pthread_key_, &OnThreadExit) != 0) {
     abort();
   }
@@ -320,10 +320,6 @@ ThreadLocalPtr::StaticMeta::StaticMeta() : next_instance_id_(0), head_(this) {
 #if !defined(OS_WIN)
   static struct A {
     ~A() {
-#ifndef ROCKSDB_SUPPORT_THREAD_LOCAL
-      ThreadData* tls_ =
-        static_cast<ThreadData*>(pthread_getspecific(Instance()->pthread_key_));
-#endif
       if (tls_) {
         OnThreadExit(tls_);
       }
@@ -358,13 +354,6 @@ void ThreadLocalPtr::StaticMeta::RemoveThreadData(
 }
 
 ThreadData* ThreadLocalPtr::StaticMeta::GetThreadLocal() {
-#ifndef ROCKSDB_SUPPORT_THREAD_LOCAL
-  // Make this local variable name look like a member variable so that we
-  // can share all the code below
-  ThreadData* tls_ =
-      static_cast<ThreadData*>(pthread_getspecific(Instance()->pthread_key_));
-#endif
-
   if (UNLIKELY(tls_ == nullptr)) {
     auto* inst = Instance();
     tls_ = new ThreadData(inst);
@@ -543,4 +532,4 @@ void ThreadLocalPtr::Fold(FoldFunc func, void* res) {
   Instance()->Fold(id_, func, res);
 }
 
-}  // namespace rocksdb
+}  // namespace ROCKSDB_NAMESPACE

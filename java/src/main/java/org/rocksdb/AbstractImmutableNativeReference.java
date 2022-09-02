@@ -12,6 +12,7 @@ import java.util.concurrent.atomic.AtomicBoolean;
  * {@link AbstractNativeReference} which have an immutable reference to the
  * underlying native C++ object
  */
+//@ThreadSafe
 public abstract class AbstractImmutableNativeReference
     extends AbstractNativeReference {
 
@@ -19,7 +20,7 @@ public abstract class AbstractImmutableNativeReference
    * A flag indicating whether the current {@code AbstractNativeReference} is
    * responsible to free the underlying C++ object
    */
-  private final AtomicBoolean owningHandle_;
+  protected final AtomicBoolean owningHandle_;
 
   protected AbstractImmutableNativeReference(final boolean owningHandle) {
     this.owningHandle_ = new AtomicBoolean(owningHandle);
@@ -35,16 +36,14 @@ public abstract class AbstractImmutableNativeReference
    * freeing the underlying native C++ object
    * <p>
    * This will prevent the object from attempting to delete the underlying
-   * native object in its finalizer. This must be used when another object
+   * native object in {@code close()}. This must be used when another object
    * takes over ownership of the native object or both will attempt to delete
-   * the underlying object when garbage collected.
+   * the underlying object when closed.
    * <p>
-   * When {@code disOwnNativeHandle()} is called, {@code dispose()} will
+   * When {@code disOwnNativeHandle()} is called, {@code close()} will
    * subsequently take no action. As a result, incorrect use of this function
    * may cause a memory leak.
    * </p>
-   *
-   * @see #dispose()
    */
   protected final void disOwnNativeHandle() {
     owningHandle_.set(false);
@@ -58,7 +57,7 @@ public abstract class AbstractImmutableNativeReference
   }
 
   /**
-   * The helper function of {@link AbstractImmutableNativeReference#dispose()}
+   * The helper function of {@link AbstractImmutableNativeReference#close()}
    * which all subclasses of {@code AbstractImmutableNativeReference} must
    * implement to release their underlying native C++ objects.
    */

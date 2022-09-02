@@ -10,7 +10,9 @@
 #include <cstdio>
 int main() { fprintf(stderr, "Please install gflags to run tools\n"); }
 #else
-#include <gflags/gflags.h>
+
+#include <sys/time.h>
+#include <unistd.h>
 
 #include <atomic>
 #include <functional>
@@ -18,8 +20,11 @@ int main() { fprintf(stderr, "Please install gflags to run tools\n"); }
 #include <unordered_map>
 
 #include "port/port_posix.h"
+#include "port/sys_time.h"
 #include "rocksdb/env.h"
+#include "util/gflags_compat.h"
 #include "util/mutexlock.h"
+#include "util/random.h"
 #include "utilities/persistent_cache/hash_table.h"
 
 using std::string;
@@ -29,7 +34,7 @@ DEFINE_int32(nthread_write, 1, "insert %");
 DEFINE_int32(nthread_read, 1, "lookup %");
 DEFINE_int32(nthread_erase, 1, "erase %");
 
-namespace rocksdb {
+namespace ROCKSDB_NAMESPACE {
 
 //
 // HashTableImpl interface
@@ -149,8 +154,8 @@ class HashTableBenchmark {
   }
 
   static uint64_t NowInMillSec() {
-    timeval tv;
-    gettimeofday(&tv, /*tz=*/nullptr);
+    port::TimeVal tv;
+    port::GetTimeOfDay(&tv, /*tz=*/nullptr);
     return tv.tv_sec * 1000 + tv.tv_usec / 1000;
   }
 
@@ -266,33 +271,35 @@ class GranularLockImpl : public HashTableImpl<size_t, string> {
   HashTable<Node, Hash, Equal> impl_;
 };
 
-}  // namespace rocksdb
+}  // namespace ROCKSDB_NAMESPACE
 
 //
 // main
 //
 int main(int argc, char** argv) {
-  GFLAGS::SetUsageMessage(std::string("\nUSAGE:\n") + std::string(argv[0]) +
-                          " [OPTIONS]...");
-  GFLAGS::ParseCommandLineFlags(&argc, &argv, false);
+  GFLAGS_NAMESPACE::SetUsageMessage(std::string("\nUSAGE:\n") +
+                                    std::string(argv[0]) + " [OPTIONS]...");
+  GFLAGS_NAMESPACE::ParseCommandLineFlags(&argc, &argv, false);
 
   //
   // Micro benchmark unordered_map
   //
   printf("Micro benchmarking std::unordered_map \n");
   {
-    rocksdb::SimpleImpl impl;
-    rocksdb::HashTableBenchmark _(&impl, FLAGS_nsec, FLAGS_nthread_write,
-                                  FLAGS_nthread_read, FLAGS_nthread_erase);
+    ROCKSDB_NAMESPACE::SimpleImpl impl;
+    ROCKSDB_NAMESPACE::HashTableBenchmark _(
+        &impl, FLAGS_nsec, FLAGS_nthread_write, FLAGS_nthread_read,
+        FLAGS_nthread_erase);
   }
   //
   // Micro benchmark scalable hash table
   //
   printf("Micro benchmarking scalable hash map \n");
   {
-    rocksdb::GranularLockImpl impl;
-    rocksdb::HashTableBenchmark _(&impl, FLAGS_nsec, FLAGS_nthread_write,
-                                  FLAGS_nthread_read, FLAGS_nthread_erase);
+    ROCKSDB_NAMESPACE::GranularLockImpl impl;
+    ROCKSDB_NAMESPACE::HashTableBenchmark _(
+        &impl, FLAGS_nsec, FLAGS_nthread_write, FLAGS_nthread_read,
+        FLAGS_nthread_erase);
   }
 
   return 0;

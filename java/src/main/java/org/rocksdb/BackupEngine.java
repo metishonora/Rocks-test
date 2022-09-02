@@ -11,7 +11,7 @@ import java.util.List;
  * and restore the database
  *
  * Be aware, that `new BackupEngine` takes time proportional to the amount
- * of backups. So if you have a slow filesystem to backup (like HDFS)
+ * of backups. So if you have a slow filesystem to backup
  * and you have a lot of backups then restoring can take some time.
  * That's why we recommend to limit the number of backups.
  * Also we recommend to keep BackupEngine alive and not to recreate it every
@@ -32,8 +32,8 @@ public class BackupEngine extends RocksObject implements AutoCloseable {
    * @return A new BackupEngine instance
    * @throws RocksDBException thrown if the backup engine could not be opened
    */
-  public static BackupEngine open(final Env env,
-      final BackupableDBOptions options) throws RocksDBException {
+  public static BackupEngine open(final Env env, final BackupEngineOptions options)
+      throws RocksDBException {
     return new BackupEngine(open(env.nativeHandle_, options.nativeHandle_));
   }
 
@@ -65,7 +65,10 @@ public class BackupEngine extends RocksObject implements AutoCloseable {
    *                          When false, the Backup Engine will not issue a
    *                          flush before starting the backup. In that case,
    *                          the backup will also include log files
-   *                          corresponding to live memtables. The backup will
+   *                          corresponding to live memtables. If writes have
+   *                          been performed with the write ahead log disabled,
+   *                          set flushBeforeBackup to true to prevent those
+   *                          writes from being lost. Otherwise, the backup will
    *                          always be consistent with the current state of the
    *                          database regardless of the flushBeforeBackup
    *                          parameter.
@@ -79,6 +82,38 @@ public class BackupEngine extends RocksObject implements AutoCloseable {
       throws RocksDBException {
     assert (isOwningHandle());
     createNewBackup(nativeHandle_, db.nativeHandle_, flushBeforeBackup);
+  }
+
+  /**
+   * Captures the state of the database in the latest backup along with
+   * application specific metadata.
+   *
+   * @param db The database to backup
+   * @param metadata Application metadata
+   * @param flushBeforeBackup When true, the Backup Engine will first issue a
+   *                          memtable flush and only then copy the DB files to
+   *                          the backup directory. Doing so will prevent log
+   *                          files from being copied to the backup directory
+   *                          (since flush will delete them).
+   *                          When false, the Backup Engine will not issue a
+   *                          flush before starting the backup. In that case,
+   *                          the backup will also include log files
+   *                          corresponding to live memtables. If writes have
+   *                          been performed with the write ahead log disabled,
+   *                          set flushBeforeBackup to true to prevent those
+   *                          writes from being lost. Otherwise, the backup will
+   *                          always be consistent with the current state of the
+   *                          database regardless of the flushBeforeBackup
+   *                          parameter.
+   *
+   * Note - This method is not thread safe
+   *
+   * @throws RocksDBException thrown if a new backup could not be created
+   */
+  public void createNewBackupWithMetadata(final RocksDB db, final String metadata,
+      final boolean flushBeforeBackup) throws RocksDBException {
+    assert (isOwningHandle());
+    createNewBackupWithMetadata(nativeHandle_, db.nativeHandle_, metadata, flushBeforeBackup);
   }
 
   /**
@@ -191,11 +226,14 @@ public class BackupEngine extends RocksObject implements AutoCloseable {
         restoreOptions.nativeHandle_);
   }
 
-  private native static long open(final long env,
-      final long backupableDbOptions) throws RocksDBException;
+  private native static long open(final long env, final long backupEngineOptions)
+      throws RocksDBException;
 
   private native void createNewBackup(final long handle, final long dbHandle,
       final boolean flushBeforeBackup) throws RocksDBException;
+
+  private native void createNewBackupWithMetadata(final long handle, final long dbHandle,
+      final String metadata, final boolean flushBeforeBackup) throws RocksDBException;
 
   private native List<BackupInfo> getBackupInfo(final long handle);
 

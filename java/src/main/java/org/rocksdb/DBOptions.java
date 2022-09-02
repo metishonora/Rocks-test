@@ -12,11 +12,12 @@ import java.util.*;
  * DBOptions to control the behavior of a database.  It will be used
  * during the creation of a {@link org.rocksdb.RocksDB} (i.e., RocksDB.open()).
  *
- * If {@link #dispose()} function is not called, then it will be GC'd
- * automatically and native resources will be released as part of the process.
+ * As a descendent of {@link AbstractNativeReference}, this class is {@link AutoCloseable}
+ * and will be automatically released if opened in the preamble of a try with resources block.
  */
-public class DBOptions
-    extends RocksObject implements DBOptionsInterface<DBOptions> {
+public class DBOptions extends RocksObject
+    implements DBOptionsInterface<DBOptions>,
+    MutableDBOptionsInterface<DBOptions> {
   static {
     RocksDB.loadLibrary();
   }
@@ -30,6 +31,64 @@ public class DBOptions
   public DBOptions() {
     super(newDBOptions());
     numShardBits_ = DEFAULT_NUM_SHARD_BITS;
+  }
+
+  /**
+   * Copy constructor for DBOptions.
+   *
+   * NOTE: This does a shallow copy, which means env, rate_limiter, sst_file_manager,
+   * info_log and other pointers will be cloned!
+   *
+   * @param other The DBOptions to copy.
+   */
+  public DBOptions(DBOptions other) {
+    super(copyDBOptions(other.nativeHandle_));
+    this.env_ = other.env_;
+    this.numShardBits_ = other.numShardBits_;
+    this.rateLimiter_ = other.rateLimiter_;
+    this.rowCache_ = other.rowCache_;
+    this.walFilter_ = other.walFilter_;
+    this.writeBufferManager_ = other.writeBufferManager_;
+  }
+
+  /**
+   * Constructor from Options
+   *
+   * @param options The options.
+   */
+  public DBOptions(final Options options) {
+    super(newDBOptionsFromOptions(options.nativeHandle_));
+  }
+
+  /**
+   * <p>Method to get a options instance by using pre-configured
+   * property values. If one or many values are undefined in
+   * the context of RocksDB the method will return a null
+   * value.</p>
+   *
+   * <p><strong>Note</strong>: Property keys can be derived from
+   * getter methods within the options class. Example: the method
+   * {@code allowMmapReads()} has a property key:
+   * {@code allow_mmap_reads}.</p>
+   *
+   * @param cfgOpts The ConfigOptions to control how the string is processed.
+   * @param properties {@link java.util.Properties} instance.
+   *
+   * @return {@link org.rocksdb.DBOptions instance}
+   *     or null.
+   *
+   * @throws java.lang.IllegalArgumentException if null or empty
+   *     {@link java.util.Properties} instance is passed to the method call.
+   */
+  public static DBOptions getDBOptionsFromProps(
+      final ConfigOptions cfgOpts, final Properties properties) {
+    DBOptions dbOptions = null;
+    final String optionsString = Options.getOptionStringFromProps(properties);
+    final long handle = getDBOptionsFromProps(cfgOpts.nativeHandle_, optionsString);
+    if (handle != 0) {
+      dbOptions = new DBOptions(handle);
+    }
+    return dbOptions;
   }
 
   /**
@@ -51,23 +110,11 @@ public class DBOptions
    * @throws java.lang.IllegalArgumentException if null or empty
    *     {@link java.util.Properties} instance is passed to the method call.
    */
-  public static DBOptions getDBOptionsFromProps(
-      final Properties properties) {
-    if (properties == null || properties.size() == 0) {
-      throw new IllegalArgumentException(
-          "Properties value must contain at least one value.");
-    }
+  public static DBOptions getDBOptionsFromProps(final Properties properties) {
     DBOptions dbOptions = null;
-    StringBuilder stringBuilder = new StringBuilder();
-    for (final String name : properties.stringPropertyNames()){
-      stringBuilder.append(name);
-      stringBuilder.append("=");
-      stringBuilder.append(properties.getProperty(name));
-      stringBuilder.append(";");
-    }
-    long handle = getDBOptionsFromProps(
-        stringBuilder.toString());
-    if (handle != 0){
+    final String optionsString = Options.getOptionStringFromProps(properties);
+    final long handle = getDBOptionsFromProps(optionsString);
+    if (handle != 0) {
       dbOptions = new DBOptions(handle);
     }
     return dbOptions;
@@ -115,18 +162,6 @@ public class DBOptions
   }
 
   @Override
-  public DBOptions setEnv(final Env env) {
-    setEnv(nativeHandle_, env.nativeHandle_);
-    this.env_ = env;
-    return this;
-  }
-
-  @Override
-  public Env getEnv() {
-    return env_;
-  }
-
-  @Override
   public DBOptions setErrorIfExists(
       final boolean errorIfExists) {
     assert(isOwningHandle());
@@ -155,10 +190,29 @@ public class DBOptions
   }
 
   @Override
+  public DBOptions setEnv(final Env env) {
+    setEnv(nativeHandle_, env.nativeHandle_);
+    this.env_ = env;
+    return this;
+  }
+
+  @Override
+  public Env getEnv() {
+    return env_;
+  }
+
+  @Override
   public DBOptions setRateLimiter(final RateLimiter rateLimiter) {
     assert(isOwningHandle());
     rateLimiter_ = rateLimiter;
     setRateLimiter(nativeHandle_, rateLimiter.nativeHandle_);
+    return this;
+  }
+
+  @Override
+  public DBOptions setSstFileManager(final SstFileManager sstFileManager) {
+    assert(isOwningHandle());
+    setSstFileManager(nativeHandle_, sstFileManager.nativeHandle_);
     return this;
   }
 
@@ -262,8 +316,8 @@ public class DBOptions
     assert(isOwningHandle());
 
     final int len = dbPaths.size();
-    final String paths[] = new String[len];
-    final long targetSizes[] = new long[len];
+    final String[] paths = new String[len];
+    final long[] targetSizes = new long[len];
 
     int i = 0;
     for(final DbPath dbPath : dbPaths) {
@@ -281,8 +335,8 @@ public class DBOptions
     if(len == 0) {
       return Collections.emptyList();
     } else {
-      final String paths[] = new String[len];
-      final long targetSizes[] = new long[len];
+      final String[] paths = new String[len];
+      final long[] targetSizes = new long[len];
 
       dbPaths(nativeHandle_, paths, targetSizes);
 
@@ -337,19 +391,20 @@ public class DBOptions
   }
 
   @Override
-  public void setBaseBackgroundCompactions(
-      final int baseBackgroundCompactions) {
+  public DBOptions setMaxBackgroundJobs(final int maxBackgroundJobs) {
     assert(isOwningHandle());
-    setBaseBackgroundCompactions(nativeHandle_, baseBackgroundCompactions);
+    setMaxBackgroundJobs(nativeHandle_, maxBackgroundJobs);
+    return this;
   }
 
   @Override
-  public int baseBackgroundCompactions() {
+  public int maxBackgroundJobs() {
     assert(isOwningHandle());
-    return baseBackgroundCompactions(nativeHandle_);
+    return maxBackgroundJobs(nativeHandle_);
   }
 
   @Override
+  @Deprecated
   public DBOptions setMaxBackgroundCompactions(
       final int maxBackgroundCompactions) {
     assert(isOwningHandle());
@@ -358,15 +413,17 @@ public class DBOptions
   }
 
   @Override
+  @Deprecated
   public int maxBackgroundCompactions() {
     assert(isOwningHandle());
     return maxBackgroundCompactions(nativeHandle_);
   }
 
   @Override
-  public void setMaxSubcompactions(final int maxSubcompactions) {
+  public DBOptions setMaxSubcompactions(final int maxSubcompactions) {
     assert(isOwningHandle());
     setMaxSubcompactions(nativeHandle_, maxSubcompactions);
+    return this;
   }
 
   @Override
@@ -376,6 +433,7 @@ public class DBOptions
   }
 
   @Override
+  @Deprecated
   public DBOptions setMaxBackgroundFlushes(
       final int maxBackgroundFlushes) {
     assert(isOwningHandle());
@@ -384,14 +442,14 @@ public class DBOptions
   }
 
   @Override
+  @Deprecated
   public int maxBackgroundFlushes() {
     assert(isOwningHandle());
     return maxBackgroundFlushes(nativeHandle_);
   }
 
   @Override
-  public DBOptions setMaxLogFileSize(
-      final long maxLogFileSize) {
+  public DBOptions setMaxLogFileSize(final long maxLogFileSize) {
     assert(isOwningHandle());
     setMaxLogFileSize(nativeHandle_, maxLogFileSize);
     return this;
@@ -501,6 +559,18 @@ public class DBOptions
   }
 
   @Override
+  public DBOptions setMaxWriteBatchGroupSizeBytes(final long maxWriteBatchGroupSizeBytes) {
+    setMaxWriteBatchGroupSizeBytes(nativeHandle_, maxWriteBatchGroupSizeBytes);
+    return this;
+  }
+
+  @Override
+  public long maxWriteBatchGroupSizeBytes() {
+    assert (isOwningHandle());
+    return maxWriteBatchGroupSizeBytes(nativeHandle_);
+  }
+
+  @Override
   public DBOptions setManifestPreallocationSize(
       final long size) {
     assert(isOwningHandle());
@@ -512,6 +582,34 @@ public class DBOptions
   public long manifestPreallocationSize() {
     assert(isOwningHandle());
     return manifestPreallocationSize(nativeHandle_);
+  }
+
+  @Override
+  public DBOptions setAllowMmapReads(
+      final boolean allowMmapReads) {
+    assert(isOwningHandle());
+    setAllowMmapReads(nativeHandle_, allowMmapReads);
+    return this;
+  }
+
+  @Override
+  public boolean allowMmapReads() {
+    assert(isOwningHandle());
+    return allowMmapReads(nativeHandle_);
+  }
+
+  @Override
+  public DBOptions setAllowMmapWrites(
+      final boolean allowMmapWrites) {
+    assert(isOwningHandle());
+    setAllowMmapWrites(nativeHandle_, allowMmapWrites);
+    return this;
+  }
+
+  @Override
+  public boolean allowMmapWrites() {
+    assert(isOwningHandle());
+    return allowMmapWrites(nativeHandle_);
   }
 
   @Override
@@ -557,34 +655,6 @@ public class DBOptions
   }
 
   @Override
-  public DBOptions setAllowMmapReads(
-      final boolean allowMmapReads) {
-    assert(isOwningHandle());
-    setAllowMmapReads(nativeHandle_, allowMmapReads);
-    return this;
-  }
-
-  @Override
-  public boolean allowMmapReads() {
-    assert(isOwningHandle());
-    return allowMmapReads(nativeHandle_);
-  }
-
-  @Override
-  public DBOptions setAllowMmapWrites(
-      final boolean allowMmapWrites) {
-    assert(isOwningHandle());
-    setAllowMmapWrites(nativeHandle_, allowMmapWrites);
-    return this;
-  }
-
-  @Override
-  public boolean allowMmapWrites() {
-    assert(isOwningHandle());
-    return allowMmapWrites(nativeHandle_);
-  }
-
-  @Override
   public DBOptions setIsFdCloseOnExec(
       final boolean isFdCloseOnExec) {
     assert(isOwningHandle());
@@ -613,6 +683,34 @@ public class DBOptions
   }
 
   @Override
+  public DBOptions setStatsPersistPeriodSec(
+      final int statsPersistPeriodSec) {
+    assert(isOwningHandle());
+    setStatsPersistPeriodSec(nativeHandle_, statsPersistPeriodSec);
+    return this;
+  }
+
+  @Override
+  public int statsPersistPeriodSec() {
+    assert(isOwningHandle());
+    return statsPersistPeriodSec(nativeHandle_);
+  }
+
+  @Override
+  public DBOptions setStatsHistoryBufferSize(
+      final long statsHistoryBufferSize) {
+    assert(isOwningHandle());
+    setStatsHistoryBufferSize(nativeHandle_, statsHistoryBufferSize);
+    return this;
+  }
+
+  @Override
+  public long statsHistoryBufferSize() {
+    assert(isOwningHandle());
+    return statsHistoryBufferSize(nativeHandle_);
+  }
+
+  @Override
   public DBOptions setAdviseRandomOnOpen(
       final boolean adviseRandomOnOpen) {
     assert(isOwningHandle());
@@ -633,6 +731,20 @@ public class DBOptions
   }
 
   @Override
+  public DBOptions setWriteBufferManager(final WriteBufferManager writeBufferManager) {
+    assert(isOwningHandle());
+    setWriteBufferManager(nativeHandle_, writeBufferManager.nativeHandle_);
+    this.writeBufferManager_ = writeBufferManager;
+    return this;
+  }
+
+  @Override
+  public WriteBufferManager writeBufferManager() {
+    assert(isOwningHandle());
+    return this.writeBufferManager_;
+  }
+
+  @Override
   public long dbWriteBufferSize() {
     assert(isOwningHandle());
     return dbWriteBufferSize(nativeHandle_);
@@ -649,21 +761,6 @@ public class DBOptions
   public AccessHint accessHintOnCompactionStart() {
     assert(isOwningHandle());
     return AccessHint.getAccessHint(accessHintOnCompactionStart(nativeHandle_));
-  }
-
-  @Override
-  public DBOptions setNewTableReaderForCompactionInputs(
-      final boolean newTableReaderForCompactionInputs) {
-    assert(isOwningHandle());
-    setNewTableReaderForCompactionInputs(nativeHandle_,
-        newTableReaderForCompactionInputs);
-    return this;
-  }
-
-  @Override
-  public boolean newTableReaderForCompactionInputs() {
-    assert(isOwningHandle());
-    return newTableReaderForCompactionInputs(nativeHandle_);
   }
 
   @Override
@@ -746,6 +843,32 @@ public class DBOptions
   }
 
   @Override
+  public DBOptions setStrictBytesPerSync(final boolean strictBytesPerSync) {
+    assert(isOwningHandle());
+    setStrictBytesPerSync(nativeHandle_, strictBytesPerSync);
+    return this;
+  }
+
+  @Override
+  public boolean strictBytesPerSync() {
+    assert(isOwningHandle());
+    return strictBytesPerSync(nativeHandle_);
+  }
+
+  @Override
+  public DBOptions setListeners(final List<AbstractEventListener> listeners) {
+    assert (isOwningHandle());
+    setEventListeners(nativeHandle_, RocksCallbackObject.toNativeHandleList(listeners));
+    return this;
+  }
+
+  @Override
+  public List<AbstractEventListener> listeners() {
+    assert (isOwningHandle());
+    return Arrays.asList(eventListeners(nativeHandle_));
+  }
+
+  @Override
   public DBOptions setEnableThreadTracking(final boolean enableThreadTracking) {
     assert(isOwningHandle());
     setEnableThreadTracking(nativeHandle_, enableThreadTracking);
@@ -769,6 +892,31 @@ public class DBOptions
   public long delayedWriteRate(){
     return delayedWriteRate(nativeHandle_);
   }
+
+  @Override
+  public DBOptions setEnablePipelinedWrite(final boolean enablePipelinedWrite) {
+    assert(isOwningHandle());
+    setEnablePipelinedWrite(nativeHandle_, enablePipelinedWrite);
+    return this;
+  }
+
+  @Override
+  public boolean enablePipelinedWrite() {
+    assert(isOwningHandle());
+    return enablePipelinedWrite(nativeHandle_);
+  }
+
+  @Override
+  public DBOptions setUnorderedWrite(final boolean unorderedWrite) {
+    setUnorderedWrite(nativeHandle_, unorderedWrite);
+    return this;
+  }
+
+  @Override
+  public boolean unorderedWrite() {
+    return unorderedWrite(nativeHandle_);
+  }
+
 
   @Override
   public DBOptions setAllowConcurrentMemtableWrite(
@@ -832,6 +980,19 @@ public class DBOptions
   }
 
   @Override
+  public DBOptions setSkipCheckingSstFileSizesOnDbOpen(
+      final boolean skipCheckingSstFileSizesOnDbOpen) {
+    setSkipCheckingSstFileSizesOnDbOpen(nativeHandle_, skipCheckingSstFileSizesOnDbOpen);
+    return this;
+  }
+
+  @Override
+  public boolean skipCheckingSstFileSizesOnDbOpen() {
+    assert (isOwningHandle());
+    return skipCheckingSstFileSizesOnDbOpen(nativeHandle_);
+  }
+
+  @Override
   public DBOptions setWalRecoveryMode(final WALRecoveryMode walRecoveryMode) {
     assert(isOwningHandle());
     setWalRecoveryMode(nativeHandle_, walRecoveryMode.getValue());
@@ -869,6 +1030,20 @@ public class DBOptions
   public Cache rowCache() {
     assert(isOwningHandle());
     return this.rowCache_;
+  }
+
+  @Override
+  public DBOptions setWalFilter(final AbstractWalFilter walFilter) {
+    assert(isOwningHandle());
+    setWalFilter(nativeHandle_, walFilter.nativeHandle_);
+    this.walFilter_ = walFilter;
+    return this;
+  }
+
+  @Override
+  public WalFilter walFilter() {
+    assert(isOwningHandle());
+    return this.walFilter_;
   }
 
   @Override
@@ -923,6 +1098,140 @@ public class DBOptions
     return avoidFlushDuringShutdown(nativeHandle_);
   }
 
+  @Override
+  public DBOptions setAllowIngestBehind(final boolean allowIngestBehind) {
+    assert(isOwningHandle());
+    setAllowIngestBehind(nativeHandle_, allowIngestBehind);
+    return this;
+  }
+
+  @Override
+  public boolean allowIngestBehind() {
+    assert(isOwningHandle());
+    return allowIngestBehind(nativeHandle_);
+  }
+
+  @Override
+  public DBOptions setTwoWriteQueues(final boolean twoWriteQueues) {
+    assert(isOwningHandle());
+    setTwoWriteQueues(nativeHandle_, twoWriteQueues);
+    return this;
+  }
+
+  @Override
+  public boolean twoWriteQueues() {
+    assert(isOwningHandle());
+    return twoWriteQueues(nativeHandle_);
+  }
+
+  @Override
+  public DBOptions setManualWalFlush(final boolean manualWalFlush) {
+    assert(isOwningHandle());
+    setManualWalFlush(nativeHandle_, manualWalFlush);
+    return this;
+  }
+
+  @Override
+  public boolean manualWalFlush() {
+    assert(isOwningHandle());
+    return manualWalFlush(nativeHandle_);
+  }
+
+  @Override
+  public DBOptions setAtomicFlush(final boolean atomicFlush) {
+    setAtomicFlush(nativeHandle_, atomicFlush);
+    return this;
+  }
+
+  @Override
+  public boolean atomicFlush() {
+    return atomicFlush(nativeHandle_);
+  }
+
+  @Override
+  public DBOptions setAvoidUnnecessaryBlockingIO(final boolean avoidUnnecessaryBlockingIO) {
+    setAvoidUnnecessaryBlockingIO(nativeHandle_, avoidUnnecessaryBlockingIO);
+    return this;
+  }
+
+  @Override
+  public boolean avoidUnnecessaryBlockingIO() {
+    assert (isOwningHandle());
+    return avoidUnnecessaryBlockingIO(nativeHandle_);
+  }
+
+  @Override
+  public DBOptions setPersistStatsToDisk(final boolean persistStatsToDisk) {
+    setPersistStatsToDisk(nativeHandle_, persistStatsToDisk);
+    return this;
+  }
+
+  @Override
+  public boolean persistStatsToDisk() {
+    assert (isOwningHandle());
+    return persistStatsToDisk(nativeHandle_);
+  }
+
+  @Override
+  public DBOptions setWriteDbidToManifest(final boolean writeDbidToManifest) {
+    setWriteDbidToManifest(nativeHandle_, writeDbidToManifest);
+    return this;
+  }
+
+  @Override
+  public boolean writeDbidToManifest() {
+    assert (isOwningHandle());
+    return writeDbidToManifest(nativeHandle_);
+  }
+
+  @Override
+  public DBOptions setLogReadaheadSize(final long logReadaheadSize) {
+    setLogReadaheadSize(nativeHandle_, logReadaheadSize);
+    return this;
+  }
+
+  @Override
+  public long logReadaheadSize() {
+    assert (isOwningHandle());
+    return logReadaheadSize(nativeHandle_);
+  }
+
+  @Override
+  public DBOptions setBestEffortsRecovery(final boolean bestEffortsRecovery) {
+    setBestEffortsRecovery(nativeHandle_, bestEffortsRecovery);
+    return this;
+  }
+
+  @Override
+  public boolean bestEffortsRecovery() {
+    assert (isOwningHandle());
+    return bestEffortsRecovery(nativeHandle_);
+  }
+
+  @Override
+  public DBOptions setMaxBgErrorResumeCount(final int maxBgerrorResumeCount) {
+    setMaxBgErrorResumeCount(nativeHandle_, maxBgerrorResumeCount);
+    return this;
+  }
+
+  @Override
+  public int maxBgerrorResumeCount() {
+    assert (isOwningHandle());
+    return maxBgerrorResumeCount(nativeHandle_);
+  }
+
+  @Override
+  public DBOptions setBgerrorResumeRetryInterval(final long bgerrorResumeRetryInterval) {
+    setBgerrorResumeRetryInterval(nativeHandle_, bgerrorResumeRetryInterval);
+    return this;
+  }
+
+  @Override
+  public long bgerrorResumeRetryInterval() {
+    assert (isOwningHandle());
+    return bgerrorResumeRetryInterval(nativeHandle_);
+  }
+
   static final int DEFAULT_NUM_SHARD_BITS = -1;
 
 
@@ -938,10 +1247,12 @@ public class DBOptions
     super(nativeHandle);
   }
 
-  private static native long getDBOptionsFromProps(
-      String optString);
+  private static native long getDBOptionsFromProps(long cfgHandle, String optString);
+  private static native long getDBOptionsFromProps(String optString);
 
-  private native static long newDBOptions();
+  private static native long newDBOptions();
+  private static native long copyDBOptions(final long handle);
+  private static native long newDBOptionsFromOptions(final long optionsHandle);
   @Override protected final native void disposeInternal(final long handle);
 
   private native void optimizeForSmallDb(final long handle);
@@ -959,6 +1270,8 @@ public class DBOptions
   private native boolean paranoidChecks(long handle);
   private native void setRateLimiter(long handle,
       long rateLimiterHandle);
+  private native void setSstFileManager(final long handle,
+      final long sstFileManagerHandle);
   private native void setLogger(long handle,
       long loggerHandle);
   private native void setInfoLogLevel(long handle, byte logLevel);
@@ -987,9 +1300,6 @@ public class DBOptions
   private native void setDeleteObsoleteFilesPeriodMicros(
       long handle, long micros);
   private native long deleteObsoleteFilesPeriodMicros(long handle);
-  private native void setBaseBackgroundCompactions(long handle,
-      int baseBackgroundCompactions);
-  private native int baseBackgroundCompactions(long handle);
   private native void setMaxBackgroundCompactions(
       long handle, int maxBackgroundCompactions);
   private native int maxBackgroundCompactions(long handle);
@@ -998,6 +1308,8 @@ public class DBOptions
   private native void setMaxBackgroundFlushes(
       long handle, int maxBackgroundFlushes);
   private native int maxBackgroundFlushes(long handle);
+  private native void setMaxBackgroundJobs(long handle, int maxBackgroundJobs);
+  private native int maxBackgroundJobs(long handle);
   private native void setMaxLogFileSize(long handle, long maxLogFileSize)
       throws IllegalArgumentException;
   private native long maxLogFileSize(long handle);
@@ -1019,6 +1331,9 @@ public class DBOptions
   private native long walTtlSeconds(long handle);
   private native void setWalSizeLimitMB(long handle, long sizeLimitMB);
   private native long walSizeLimitMB(long handle);
+  private static native void setMaxWriteBatchGroupSizeBytes(
+      final long handle, final long maxWriteBatchGroupSizeBytes);
+  private static native long maxWriteBatchGroupSizeBytes(final long handle);
   private native void setManifestPreallocationSize(
       long handle, long size) throws IllegalArgumentException;
   private native long manifestPreallocationSize(long handle);
@@ -1042,18 +1357,25 @@ public class DBOptions
   private native void setStatsDumpPeriodSec(
       long handle, int statsDumpPeriodSec);
   private native int statsDumpPeriodSec(long handle);
+  private native void setStatsPersistPeriodSec(
+      final long handle, final int statsPersistPeriodSec);
+  private native int statsPersistPeriodSec(
+      final long handle);
+  private native void setStatsHistoryBufferSize(
+      final long handle, final long statsHistoryBufferSize);
+  private native long statsHistoryBufferSize(
+      final long handle);
   private native void setAdviseRandomOnOpen(
       long handle, boolean adviseRandomOnOpen);
   private native boolean adviseRandomOnOpen(long handle);
   private native void setDbWriteBufferSize(final long handle,
       final long dbWriteBufferSize);
+  private native void setWriteBufferManager(final long dbOptionsHandle,
+      final long writeBufferManagerHandle);
   private native long dbWriteBufferSize(final long handle);
   private native void setAccessHintOnCompactionStart(final long handle,
       final byte accessHintOnCompactionStart);
   private native byte accessHintOnCompactionStart(final long handle);
-  private native void setNewTableReaderForCompactionInputs(final long handle,
-      final boolean newTableReaderForCompactionInputs);
-  private native boolean newTableReaderForCompactionInputs(final long handle);
   private native void setCompactionReadaheadSize(final long handle,
       final long compactionReadaheadSize);
   private native long compactionReadaheadSize(final long handle);
@@ -1071,11 +1393,24 @@ public class DBOptions
   private native long bytesPerSync(long handle);
   private native void setWalBytesPerSync(long handle, long walBytesPerSync);
   private native long walBytesPerSync(long handle);
+  private native void setStrictBytesPerSync(
+      final long handle, final boolean strictBytesPerSync);
+  private native boolean strictBytesPerSync(
+      final long handle);
+  private static native void setEventListeners(
+      final long handle, final long[] eventListenerHandles);
+  private static native AbstractEventListener[] eventListeners(final long handle);
   private native void setEnableThreadTracking(long handle,
       boolean enableThreadTracking);
   private native boolean enableThreadTracking(long handle);
   private native void setDelayedWriteRate(long handle, long delayedWriteRate);
   private native long delayedWriteRate(long handle);
+  private native void setEnablePipelinedWrite(final long handle,
+      final boolean enablePipelinedWrite);
+  private native boolean enablePipelinedWrite(final long handle);
+  private native void setUnorderedWrite(final long handle,
+      final boolean unorderedWrite);
+  private native boolean unorderedWrite(final long handle);
   private native void setAllowConcurrentMemtableWrite(long handle,
       boolean allowConcurrentMemtableWrite);
   private native boolean allowConcurrentMemtableWrite(long handle);
@@ -1091,6 +1426,9 @@ public class DBOptions
   private native void setSkipStatsUpdateOnDbOpen(final long handle,
       final boolean skipStatsUpdateOnDbOpen);
   private native boolean skipStatsUpdateOnDbOpen(final long handle);
+  private static native void setSkipCheckingSstFileSizesOnDbOpen(
+      final long handle, final boolean skipChecking);
+  private static native boolean skipCheckingSstFileSizesOnDbOpen(final long handle);
   private native void setWalRecoveryMode(final long handle,
       final byte walRecoveryMode);
   private native byte walRecoveryMode(final long handle);
@@ -1098,7 +1436,9 @@ public class DBOptions
       final boolean allow2pc);
   private native boolean allow2pc(final long handle);
   private native void setRowCache(final long handle,
-      final long row_cache_handle);
+      final long rowCacheHandle);
+  private native void setWalFilter(final long handle,
+      final long walFilterHandle);
   private native void setFailIfOptionsFileError(final long handle,
       final boolean failIfOptionsFileError);
   private native boolean failIfOptionsFileError(final long handle);
@@ -1111,10 +1451,45 @@ public class DBOptions
   private native void setAvoidFlushDuringShutdown(final long handle,
       final boolean avoidFlushDuringShutdown);
   private native boolean avoidFlushDuringShutdown(final long handle);
+  private native void setAllowIngestBehind(final long handle,
+      final boolean allowIngestBehind);
+  private native boolean allowIngestBehind(final long handle);
+  private native void setTwoWriteQueues(final long handle,
+      final boolean twoWriteQueues);
+  private native boolean twoWriteQueues(final long handle);
+  private native void setManualWalFlush(final long handle,
+      final boolean manualWalFlush);
+  private native boolean manualWalFlush(final long handle);
+  private native void setAtomicFlush(final long handle,
+      final boolean atomicFlush);
+  private native boolean atomicFlush(final long handle);
+  private static native void setAvoidUnnecessaryBlockingIO(
+      final long handle, final boolean avoidBlockingIO);
+  private static native boolean avoidUnnecessaryBlockingIO(final long handle);
+  private static native void setPersistStatsToDisk(
+      final long handle, final boolean persistStatsToDisk);
+  private static native boolean persistStatsToDisk(final long handle);
+  private static native void setWriteDbidToManifest(
+      final long handle, final boolean writeDbidToManifest);
+  private static native boolean writeDbidToManifest(final long handle);
+  private static native void setLogReadaheadSize(final long handle, final long logReadaheadSize);
+  private static native long logReadaheadSize(final long handle);
+  private static native void setBestEffortsRecovery(
+      final long handle, final boolean bestEffortsRecovery);
+  private static native boolean bestEffortsRecovery(final long handle);
+  private static native void setMaxBgErrorResumeCount(
+      final long handle, final int maxBgerrorRecumeCount);
+  private static native int maxBgerrorResumeCount(final long handle);
+  private static native void setBgerrorResumeRetryInterval(
+      final long handle, final long bgerrorResumeRetryInterval);
+  private static native long bgerrorResumeRetryInterval(final long handle);
 
   // instance variables
+  // NOTE: If you add new member variables, please update the copy constructor above!
   private Env env_;
   private int numShardBits_;
   private RateLimiter rateLimiter_;
   private Cache rowCache_;
+  private WalFilter walFilter_;
+  private WriteBufferManager writeBufferManager_;
 }

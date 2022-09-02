@@ -6,23 +6,23 @@
 #include <sstream>
 #include "monitoring/iostats_context_imp.h"
 #include "rocksdb/env.h"
-#include "util/thread_local.h"
 
-namespace rocksdb {
+namespace ROCKSDB_NAMESPACE {
 
-#ifdef ROCKSDB_SUPPORT_THREAD_LOCAL
-__thread IOStatsContext iostats_context;
+#ifdef NIOSTATS_CONTEXT
+// Should not be used because the counters are not thread-safe.
+// Put here just to make get_iostats_context() simple without ifdef.
+static IOStatsContext iostats_context;
+#else
+thread_local IOStatsContext iostats_context;
 #endif
 
 IOStatsContext* get_iostats_context() {
-#ifdef ROCKSDB_SUPPORT_THREAD_LOCAL
   return &iostats_context;
-#else
-  return nullptr;
-#endif
 }
 
 void IOStatsContext::Reset() {
+#ifndef NIOSTATS_CONTEXT
   thread_pool_id = Env::Priority::TOTAL;
   bytes_read = 0;
   bytes_written = 0;
@@ -34,6 +34,10 @@ void IOStatsContext::Reset() {
   prepare_write_nanos = 0;
   fsync_nanos = 0;
   logger_nanos = 0;
+  cpu_write_nanos = 0;
+  cpu_read_nanos = 0;
+  file_io_stats_by_temperature.Reset();
+#endif  //! NIOSTATS_CONTEXT
 }
 
 #define IOSTATS_CONTEXT_OUTPUT(counter)         \
@@ -42,6 +46,10 @@ void IOStatsContext::Reset() {
   }
 
 std::string IOStatsContext::ToString(bool exclude_zero_counters) const {
+#ifdef NIOSTATS_CONTEXT
+  (void)exclude_zero_counters;
+  return "";
+#else
   std::ostringstream ss;
   IOSTATS_CONTEXT_OUTPUT(thread_pool_id);
   IOSTATS_CONTEXT_OUTPUT(bytes_read);
@@ -54,8 +62,18 @@ std::string IOStatsContext::ToString(bool exclude_zero_counters) const {
   IOSTATS_CONTEXT_OUTPUT(fsync_nanos);
   IOSTATS_CONTEXT_OUTPUT(prepare_write_nanos);
   IOSTATS_CONTEXT_OUTPUT(logger_nanos);
-
-  return ss.str();
+  IOSTATS_CONTEXT_OUTPUT(cpu_write_nanos);
+  IOSTATS_CONTEXT_OUTPUT(cpu_read_nanos);
+  IOSTATS_CONTEXT_OUTPUT(file_io_stats_by_temperature.hot_file_bytes_read);
+  IOSTATS_CONTEXT_OUTPUT(file_io_stats_by_temperature.warm_file_bytes_read);
+  IOSTATS_CONTEXT_OUTPUT(file_io_stats_by_temperature.cold_file_bytes_read);
+  IOSTATS_CONTEXT_OUTPUT(file_io_stats_by_temperature.hot_file_read_count);
+  IOSTATS_CONTEXT_OUTPUT(file_io_stats_by_temperature.warm_file_read_count);
+  IOSTATS_CONTEXT_OUTPUT(file_io_stats_by_temperature.cold_file_read_count);
+  std::string str = ss.str();
+  str.erase(str.find_last_not_of(", ") + 1);
+  return str;
+#endif  //! NIOSTATS_CONTEXT
 }
 
-}  // namespace rocksdb
+}  // namespace ROCKSDB_NAMESPACE

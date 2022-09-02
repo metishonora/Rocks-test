@@ -7,27 +7,20 @@ package org.rocksdb;
 
 import java.util.*;
 
-public class MutableColumnFamilyOptions {
-  private final static String KEY_VALUE_PAIR_SEPARATOR = ";";
-  private final static char KEY_VALUE_SEPARATOR = '=';
-  private final static String INT_ARRAY_INT_SEPARATOR = ",";
+public class MutableColumnFamilyOptions
+    extends AbstractMutableOptions {
 
-  private final String[] keys;
-  private final String[] values;
-
-  // user must use builder pattern, or parser
-  private MutableColumnFamilyOptions(final String keys[],
-      final String values[]) {
-    this.keys = keys;
-    this.values = values;
-  }
-
-  String[] getKeys() {
-    return keys;
-  }
-
-  String[] getValues() {
-    return values;
+  /**
+   * User must use builder pattern, or parser.
+   *
+   * @param keys the keys
+   * @param values the values
+   *
+   * See {@link #builder()} and {@link #parse(String)}.
+   */
+  private MutableColumnFamilyOptions(final String[] keys,
+      final String[] values) {
+    super(keys, values);
   }
 
   /**
@@ -46,87 +39,42 @@ public class MutableColumnFamilyOptions {
    *
    * The format is: key1=value1;key2=value2;key3=value3 etc
    *
-   * For int[] values, each int should be separated by a comma, e.g.
+   * For int[] values, each int should be separated by a colon, e.g.
    *
-   * key1=value1;intArrayKey1=1,2,3
+   * key1=value1;intArrayKey1=1:2:3
    *
    * @param str The string representation of the mutable column family options
+   * @param ignoreUnknown what to do if the key is not one of the keys we expect
    *
    * @return A builder for the mutable column family options
    */
-  public static MutableColumnFamilyOptionsBuilder parse(final String str) {
+  public static MutableColumnFamilyOptionsBuilder parse(
+      final String str, final boolean ignoreUnknown) {
     Objects.requireNonNull(str);
 
-    final MutableColumnFamilyOptionsBuilder builder =
-        new MutableColumnFamilyOptionsBuilder();
-
-    final String options[] = str.trim().split(KEY_VALUE_PAIR_SEPARATOR);
-    for(final String option : options) {
-      final int equalsOffset = option.indexOf(KEY_VALUE_SEPARATOR);
-      if(equalsOffset <= 0) {
-        throw new IllegalArgumentException(
-            "options string has an invalid key=value pair");
-      }
-
-      final String key = option.substring(0, equalsOffset);
-      if(key == null || key.isEmpty()) {
-        throw new IllegalArgumentException("options string is invalid");
-      }
-
-      final String value = option.substring(equalsOffset + 1);
-      if(value == null || value.isEmpty()) {
-        throw new IllegalArgumentException("options string is invalid");
-      }
-
-      builder.fromString(key, value);
-    }
-
-    return builder;
+    final List<OptionString.Entry> parsedOptions = OptionString.Parser.parse(str);
+    return new MutableColumnFamilyOptionsBuilder().fromParsed(parsedOptions, ignoreUnknown);
   }
 
-  /**
-   * Returns a string representation
-   * of MutableColumnFamilyOptions which is
-   * suitable for consumption by {@link #parse(String)}
-   *
-   * @return String representation of MutableColumnFamilyOptions
-   */
-  @Override
-  public String toString() {
-    final StringBuilder buffer = new StringBuilder();
-    for(int i = 0; i < keys.length; i++) {
-      buffer
-          .append(keys[i])
-          .append(KEY_VALUE_SEPARATOR)
-          .append(values[i]);
-
-      if(i + 1 < keys.length) {
-        buffer.append(KEY_VALUE_PAIR_SEPARATOR);
-      }
-    }
-    return buffer.toString();
+  public static MutableColumnFamilyOptionsBuilder parse(final String str) {
+    return parse(str, false);
   }
 
-  public enum ValueType {
-    DOUBLE,
-    LONG,
-    INT,
-    BOOLEAN,
-    INT_ARRAY,
-    ENUM
-  }
+  private interface MutableColumnFamilyOptionKey extends MutableOptionKey {}
 
   public enum MemtableOption implements MutableColumnFamilyOptionKey {
     write_buffer_size(ValueType.LONG),
     arena_block_size(ValueType.LONG),
     memtable_prefix_bloom_size_ratio(ValueType.DOUBLE),
+    memtable_whole_key_filtering(ValueType.BOOLEAN),
     @Deprecated memtable_prefix_bloom_bits(ValueType.INT),
     @Deprecated memtable_prefix_bloom_probes(ValueType.INT),
     memtable_huge_page_size(ValueType.LONG),
     max_successive_merges(ValueType.LONG),
     @Deprecated filter_deletes(ValueType.BOOLEAN),
     max_write_buffer_number(ValueType.INT),
-    inplace_update_num_locks(ValueType.LONG);
+    inplace_update_num_locks(ValueType.LONG),
+    experimental_mempurge_threshold(ValueType.DOUBLE);
 
     private final ValueType valueType;
     MemtableOption(final ValueType valueType) {
@@ -141,9 +89,7 @@ public class MutableColumnFamilyOptions {
 
   public enum CompactionOption implements MutableColumnFamilyOptionKey {
     disable_auto_compactions(ValueType.BOOLEAN),
-    @Deprecated soft_rate_limit(ValueType.DOUBLE),
     soft_pending_compaction_bytes_limit(ValueType.LONG),
-    @Deprecated hard_rate_limit(ValueType.DOUBLE),
     hard_pending_compaction_bytes_limit(ValueType.LONG),
     level0_file_num_compaction_trigger(ValueType.INT),
     level0_slowdown_writes_trigger(ValueType.INT),
@@ -153,10 +99,35 @@ public class MutableColumnFamilyOptions {
     target_file_size_multiplier(ValueType.INT),
     max_bytes_for_level_base(ValueType.LONG),
     max_bytes_for_level_multiplier(ValueType.INT),
-    max_bytes_for_level_multiplier_additional(ValueType.INT_ARRAY);
+    max_bytes_for_level_multiplier_additional(ValueType.INT_ARRAY),
+    ttl(ValueType.LONG),
+    periodic_compaction_seconds(ValueType.LONG);
 
     private final ValueType valueType;
     CompactionOption(final ValueType valueType) {
+      this.valueType = valueType;
+    }
+
+    @Override
+    public ValueType getValueType() {
+      return valueType;
+    }
+  }
+
+  public enum BlobOption implements MutableColumnFamilyOptionKey {
+    enable_blob_files(ValueType.BOOLEAN),
+    min_blob_size(ValueType.LONG),
+    blob_file_size(ValueType.LONG),
+    blob_compression_type(ValueType.ENUM),
+    enable_blob_garbage_collection(ValueType.BOOLEAN),
+    blob_garbage_collection_age_cutoff(ValueType.DOUBLE),
+    blob_garbage_collection_force_threshold(ValueType.DOUBLE),
+    blob_compaction_readahead_size(ValueType.LONG),
+    blob_file_starting_level(ValueType.INT),
+    prepopulate_blob_cache(ValueType.ENUM);
+
+    private final ValueType valueType;
+    BlobOption(final ValueType valueType) {
       this.valueType = valueType;
     }
 
@@ -170,7 +141,7 @@ public class MutableColumnFamilyOptions {
     max_sequential_skip_in_iterations(ValueType.LONG),
     paranoid_file_checks(ValueType.BOOLEAN),
     report_bg_io_stats(ValueType.BOOLEAN),
-    compression_type(ValueType.ENUM);
+    compression(ValueType.ENUM);
 
     private final ValueType valueType;
     MiscOption(final ValueType valueType) {
@@ -183,356 +154,9 @@ public class MutableColumnFamilyOptions {
     }
   }
 
-  private interface MutableColumnFamilyOptionKey {
-    String name();
-    ValueType getValueType();
-  }
-
-  private static abstract class MutableColumnFamilyOptionValue<T> {
-    protected final T value;
-
-    MutableColumnFamilyOptionValue(final T value) {
-      this.value = value;
-    }
-
-    abstract double asDouble() throws NumberFormatException;
-    abstract long asLong() throws NumberFormatException;
-    abstract int asInt() throws NumberFormatException;
-    abstract boolean asBoolean() throws IllegalStateException;
-    abstract int[] asIntArray() throws IllegalStateException;
-    abstract String asString();
-    abstract T asObject();
-  }
-
-  private static class MutableColumnFamilyOptionStringValue
-      extends MutableColumnFamilyOptionValue<String> {
-    MutableColumnFamilyOptionStringValue(final String value) {
-      super(value);
-    }
-
-    @Override
-    double asDouble() throws NumberFormatException {
-      return Double.parseDouble(value);
-    }
-
-    @Override
-    long asLong() throws NumberFormatException {
-      return Long.parseLong(value);
-    }
-
-    @Override
-    int asInt() throws NumberFormatException {
-      return Integer.parseInt(value);
-    }
-
-    @Override
-    boolean asBoolean() throws IllegalStateException {
-      return Boolean.parseBoolean(value);
-    }
-
-    @Override
-    int[] asIntArray() throws IllegalStateException {
-      throw new IllegalStateException("String is not applicable as int[]");
-    }
-
-    @Override
-    String asString() {
-      return value;
-    }
-
-    @Override
-    String asObject() {
-      return value;
-    }
-  }
-
-  private static class MutableColumnFamilyOptionDoubleValue
-      extends MutableColumnFamilyOptionValue<Double> {
-    MutableColumnFamilyOptionDoubleValue(final double value) {
-      super(value);
-    }
-
-    @Override
-    double asDouble() {
-      return value;
-    }
-
-    @Override
-    long asLong() throws NumberFormatException {
-      return value.longValue();
-    }
-
-    @Override
-    int asInt() throws NumberFormatException {
-      if(value > Integer.MAX_VALUE || value < Integer.MIN_VALUE) {
-        throw new NumberFormatException(
-            "double value lies outside the bounds of int");
-      }
-      return value.intValue();
-    }
-
-    @Override
-    boolean asBoolean() throws IllegalStateException {
-      throw new IllegalStateException(
-          "double is not applicable as boolean");
-    }
-
-    @Override
-    int[] asIntArray() throws IllegalStateException {
-      if(value > Integer.MAX_VALUE || value < Integer.MIN_VALUE) {
-        throw new NumberFormatException(
-            "double value lies outside the bounds of int");
-      }
-      return new int[] { value.intValue() };
-    }
-
-    @Override
-    String asString() {
-      return Double.toString(value);
-    }
-
-    @Override
-    Double asObject() {
-      return value;
-    }
-  }
-
-  private static class MutableColumnFamilyOptionLongValue
-      extends MutableColumnFamilyOptionValue<Long> {
-    MutableColumnFamilyOptionLongValue(final long value) {
-      super(value);
-    }
-
-    @Override
-    double asDouble() {
-      if(value > Double.MAX_VALUE || value < Double.MIN_VALUE) {
-        throw new NumberFormatException(
-            "long value lies outside the bounds of int");
-      }
-      return value.doubleValue();
-    }
-
-    @Override
-    long asLong() throws NumberFormatException {
-      return value;
-    }
-
-    @Override
-    int asInt() throws NumberFormatException {
-      if(value > Integer.MAX_VALUE || value < Integer.MIN_VALUE) {
-        throw new NumberFormatException(
-            "long value lies outside the bounds of int");
-      }
-      return value.intValue();
-    }
-
-    @Override
-    boolean asBoolean() throws IllegalStateException {
-      throw new IllegalStateException(
-          "long is not applicable as boolean");
-    }
-
-    @Override
-    int[] asIntArray() throws IllegalStateException {
-      if(value > Integer.MAX_VALUE || value < Integer.MIN_VALUE) {
-        throw new NumberFormatException(
-            "long value lies outside the bounds of int");
-      }
-      return new int[] { value.intValue() };
-    }
-
-    @Override
-    String asString() {
-      return Long.toString(value);
-    }
-
-    @Override
-    Long asObject() {
-      return value;
-    }
-  }
-
-  private static class MutableColumnFamilyOptionIntValue
-      extends MutableColumnFamilyOptionValue<Integer> {
-    MutableColumnFamilyOptionIntValue(final int value) {
-      super(value);
-    }
-
-    @Override
-    double asDouble() {
-      if(value > Double.MAX_VALUE || value < Double.MIN_VALUE) {
-        throw new NumberFormatException("int value lies outside the bounds of int");
-      }
-      return value.doubleValue();
-    }
-
-    @Override
-    long asLong() throws NumberFormatException {
-      return value;
-    }
-
-    @Override
-    int asInt() throws NumberFormatException {
-      return value;
-    }
-
-    @Override
-    boolean asBoolean() throws IllegalStateException {
-      throw new IllegalStateException("int is not applicable as boolean");
-    }
-
-    @Override
-    int[] asIntArray() throws IllegalStateException {
-      return new int[] { value };
-    }
-
-    @Override
-    String asString() {
-      return Integer.toString(value);
-    }
-
-    @Override
-    Integer asObject() {
-      return value;
-    }
-  }
-
-  private static class MutableColumnFamilyOptionBooleanValue
-      extends MutableColumnFamilyOptionValue<Boolean> {
-    MutableColumnFamilyOptionBooleanValue(final boolean value) {
-      super(value);
-    }
-
-    @Override
-    double asDouble() {
-      throw new NumberFormatException("boolean is not applicable as double");
-    }
-
-    @Override
-    long asLong() throws NumberFormatException {
-      throw new NumberFormatException("boolean is not applicable as Long");
-    }
-
-    @Override
-    int asInt() throws NumberFormatException {
-      throw new NumberFormatException("boolean is not applicable as int");
-    }
-
-    @Override
-    boolean asBoolean() {
-      return value;
-    }
-
-    @Override
-    int[] asIntArray() throws IllegalStateException {
-      throw new IllegalStateException("boolean is not applicable as int[]");
-    }
-
-    @Override
-    String asString() {
-      return Boolean.toString(value);
-    }
-
-    @Override
-    Boolean asObject() {
-      return value;
-    }
-  }
-
-  private static class MutableColumnFamilyOptionIntArrayValue
-      extends MutableColumnFamilyOptionValue<int[]> {
-    MutableColumnFamilyOptionIntArrayValue(final int[] value) {
-      super(value);
-    }
-
-    @Override
-    double asDouble() {
-      throw new NumberFormatException("int[] is not applicable as double");
-    }
-
-    @Override
-    long asLong() throws NumberFormatException {
-      throw new NumberFormatException("int[] is not applicable as Long");
-    }
-
-    @Override
-    int asInt() throws NumberFormatException {
-      throw new NumberFormatException("int[] is not applicable as int");
-    }
-
-    @Override
-    boolean asBoolean() {
-      throw new NumberFormatException("int[] is not applicable as boolean");
-    }
-
-    @Override
-    int[] asIntArray() throws IllegalStateException {
-      return value;
-    }
-
-    @Override
-    String asString() {
-      final StringBuilder builder = new StringBuilder();
-      for(int i = 0; i < value.length; i++) {
-        builder.append(Integer.toString(i));
-        if(i + 1 < value.length) {
-          builder.append(INT_ARRAY_INT_SEPARATOR);
-        }
-      }
-      return builder.toString();
-    }
-
-    @Override
-    int[] asObject() {
-      return value;
-    }
-  }
-
-  private static class MutableColumnFamilyOptionEnumValue<T extends Enum<T>>
-      extends MutableColumnFamilyOptionValue<T> {
-
-    MutableColumnFamilyOptionEnumValue(final T value) {
-      super(value);
-    }
-
-    @Override
-    double asDouble() throws NumberFormatException {
-      throw new NumberFormatException("Enum is not applicable as double");
-    }
-
-    @Override
-    long asLong() throws NumberFormatException {
-      throw new NumberFormatException("Enum is not applicable as long");
-    }
-
-    @Override
-    int asInt() throws NumberFormatException {
-      throw new NumberFormatException("Enum is not applicable as int");
-    }
-
-    @Override
-    boolean asBoolean() throws IllegalStateException {
-      throw new NumberFormatException("Enum is not applicable as boolean");
-    }
-
-    @Override
-    int[] asIntArray() throws IllegalStateException {
-      throw new NumberFormatException("Enum is not applicable as int[]");
-    }
-
-    @Override
-    String asString() {
-      return value.name();
-    }
-
-    @Override
-    T asObject() {
-      return value;
-    }
-  }
-
   public static class MutableColumnFamilyOptionsBuilder
-      implements MutableColumnFamilyOptionsInterface {
+      extends AbstractMutableOptionsBuilder<MutableColumnFamilyOptions, MutableColumnFamilyOptionsBuilder, MutableColumnFamilyOptionKey>
+      implements MutableColumnFamilyOptionsInterface<MutableColumnFamilyOptionsBuilder> {
 
     private final static Map<String, MutableColumnFamilyOptionKey> ALL_KEYS_LOOKUP = new HashMap<>();
     static {
@@ -547,181 +171,30 @@ public class MutableColumnFamilyOptions {
       for(final MutableColumnFamilyOptionKey key : MiscOption.values()) {
         ALL_KEYS_LOOKUP.put(key.name(), key);
       }
+
+      for (final MutableColumnFamilyOptionKey key : BlobOption.values()) {
+        ALL_KEYS_LOOKUP.put(key.name(), key);
+      }
     }
 
-    private final Map<MutableColumnFamilyOptionKey, MutableColumnFamilyOptionValue<?>> options = new LinkedHashMap<>();
+    private MutableColumnFamilyOptionsBuilder() {
+      super();
+    }
 
-    public MutableColumnFamilyOptions build() {
-      final String keys[] = new String[options.size()];
-      final String values[] = new String[options.size()];
+    @Override
+    protected MutableColumnFamilyOptionsBuilder self() {
+      return this;
+    }
 
-      int i = 0;
-      for(final Map.Entry<MutableColumnFamilyOptionKey, MutableColumnFamilyOptionValue<?>> option : options.entrySet()) {
-        keys[i] = option.getKey().name();
-        values[i] = option.getValue().asString();
-        i++;
-      }
+    @Override
+    protected Map<String, MutableColumnFamilyOptionKey> allKeys() {
+      return ALL_KEYS_LOOKUP;
+    }
 
+    @Override
+    protected MutableColumnFamilyOptions build(final String[] keys,
+        final String[] values) {
       return new MutableColumnFamilyOptions(keys, values);
-    }
-
-    private MutableColumnFamilyOptionsBuilder setDouble(
-        final MutableColumnFamilyOptionKey key, final double value) {
-      if(key.getValueType() != ValueType.DOUBLE) {
-        throw new IllegalArgumentException(
-            key + " does not accept a double value");
-      }
-      options.put(key, new MutableColumnFamilyOptionDoubleValue(value));
-      return this;
-    }
-
-    private double getDouble(final MutableColumnFamilyOptionKey key)
-        throws NoSuchElementException, NumberFormatException {
-      final MutableColumnFamilyOptionValue<?> value = options.get(key);
-      if(value == null) {
-        throw new NoSuchElementException(key.name() + " has not been set");
-      }
-      return value.asDouble();
-    }
-
-    private MutableColumnFamilyOptionsBuilder setLong(
-        final MutableColumnFamilyOptionKey key, final long value) {
-      if(key.getValueType() != ValueType.LONG) {
-        throw new IllegalArgumentException(
-            key + " does not accept a long value");
-      }
-      options.put(key, new MutableColumnFamilyOptionLongValue(value));
-      return this;
-    }
-
-    private long getLong(final MutableColumnFamilyOptionKey key)
-        throws NoSuchElementException, NumberFormatException {
-      final MutableColumnFamilyOptionValue<?> value = options.get(key);
-      if(value == null) {
-        throw new NoSuchElementException(key.name() + " has not been set");
-      }
-      return value.asLong();
-    }
-
-    private MutableColumnFamilyOptionsBuilder setInt(
-        final MutableColumnFamilyOptionKey key, final int value) {
-      if(key.getValueType() != ValueType.INT) {
-        throw new IllegalArgumentException(
-            key + " does not accept an integer value");
-      }
-      options.put(key, new MutableColumnFamilyOptionIntValue(value));
-      return this;
-    }
-
-    private int getInt(final MutableColumnFamilyOptionKey key)
-        throws NoSuchElementException, NumberFormatException {
-      final MutableColumnFamilyOptionValue<?> value = options.get(key);
-      if(value == null) {
-        throw new NoSuchElementException(key.name() + " has not been set");
-      }
-      return value.asInt();
-    }
-
-    private MutableColumnFamilyOptionsBuilder setBoolean(
-        final MutableColumnFamilyOptionKey key, final boolean value) {
-      if(key.getValueType() != ValueType.BOOLEAN) {
-        throw new IllegalArgumentException(
-            key + " does not accept a boolean value");
-      }
-      options.put(key, new MutableColumnFamilyOptionBooleanValue(value));
-      return this;
-    }
-
-    private boolean getBoolean(final MutableColumnFamilyOptionKey key)
-        throws NoSuchElementException, NumberFormatException {
-      final MutableColumnFamilyOptionValue<?> value = options.get(key);
-      if(value == null) {
-        throw new NoSuchElementException(key.name() + " has not been set");
-      }
-      return value.asBoolean();
-    }
-
-    private MutableColumnFamilyOptionsBuilder setIntArray(
-        final MutableColumnFamilyOptionKey key, final int[] value) {
-      if(key.getValueType() != ValueType.INT_ARRAY) {
-        throw new IllegalArgumentException(
-            key + " does not accept an int array value");
-      }
-      options.put(key, new MutableColumnFamilyOptionIntArrayValue(value));
-      return this;
-    }
-
-    private int[] getIntArray(final MutableColumnFamilyOptionKey key)
-        throws NoSuchElementException, NumberFormatException {
-      final MutableColumnFamilyOptionValue<?> value = options.get(key);
-      if(value == null) {
-        throw new NoSuchElementException(key.name() + " has not been set");
-      }
-      return value.asIntArray();
-    }
-
-    private <T extends Enum<T>> MutableColumnFamilyOptionsBuilder setEnum(
-        final MutableColumnFamilyOptionKey key, final T value) {
-      if(key.getValueType() != ValueType.ENUM) {
-        throw new IllegalArgumentException(
-            key + " does not accept a Enum value");
-      }
-      options.put(key, new MutableColumnFamilyOptionEnumValue<T>(value));
-      return this;
-
-    }
-
-    private <T extends Enum<T>> T getEnum(final MutableColumnFamilyOptionKey key)
-        throws NoSuchElementException, NumberFormatException {
-      final MutableColumnFamilyOptionValue<?> value = options.get(key);
-      if(value == null) {
-        throw new NoSuchElementException(key.name() + " has not been set");
-      }
-
-      if(!(value instanceof MutableColumnFamilyOptionEnumValue)) {
-        throw new NoSuchElementException(key.name() + " is not of Enum type");
-      }
-
-      return ((MutableColumnFamilyOptionEnumValue<T>)value).asObject();
-    }
-
-    public MutableColumnFamilyOptionsBuilder fromString(final String keyStr,
-        final String valueStr) throws IllegalArgumentException {
-      Objects.requireNonNull(keyStr);
-      Objects.requireNonNull(valueStr);
-
-      final MutableColumnFamilyOptionKey key = ALL_KEYS_LOOKUP.get(keyStr);
-      switch(key.getValueType()) {
-        case DOUBLE:
-          return setDouble(key, Double.parseDouble(valueStr));
-
-        case LONG:
-          return setLong(key, Long.parseLong(valueStr));
-
-        case INT:
-          return setInt(key, Integer.parseInt(valueStr));
-
-        case BOOLEAN:
-          return setBoolean(key, Boolean.parseBoolean(valueStr));
-
-        case INT_ARRAY:
-          final String[] strInts = valueStr
-              .trim().split(INT_ARRAY_INT_SEPARATOR);
-          if(strInts == null || strInts.length == 0) {
-            throw new IllegalArgumentException(
-                "int array value is not correctly formatted");
-          }
-
-          final int value[] = new int[strInts.length];
-          int i = 0;
-          for(final String strInt : strInts) {
-            value[i++] = Integer.parseInt(strInt);
-          }
-          return setIntArray(key, value);
-      }
-
-      throw new IllegalStateException(
-          key + " has unknown value type: " + key.getValueType());
     }
 
     @Override
@@ -756,6 +229,17 @@ public class MutableColumnFamilyOptions {
     @Override
     public double memtablePrefixBloomSizeRatio() {
       return getDouble(MemtableOption.memtable_prefix_bloom_size_ratio);
+    }
+
+    @Override
+    public MutableColumnFamilyOptionsBuilder setMemtableWholeKeyFiltering(
+        final boolean memtableWholeKeyFiltering) {
+      return setBoolean(MemtableOption.memtable_whole_key_filtering, memtableWholeKeyFiltering);
+    }
+
+    @Override
+    public boolean memtableWholeKeyFiltering() {
+      return getBoolean(MemtableOption.memtable_whole_key_filtering);
     }
 
     @Override
@@ -803,6 +287,18 @@ public class MutableColumnFamilyOptions {
     @Override
     public long inplaceUpdateNumLocks() {
       return getLong(MemtableOption.inplace_update_num_locks);
+    }
+
+    @Override
+    public MutableColumnFamilyOptionsBuilder setExperimentalMempurgeThreshold(
+        final double experimentalMempurgeThreshold) {
+      return setDouble(
+          MemtableOption.experimental_mempurge_threshold, experimentalMempurgeThreshold);
+    }
+
+    @Override
+    public double experimentalMempurgeThreshold() {
+      return getDouble(MemtableOption.experimental_mempurge_threshold);
     }
 
     @Override
@@ -975,12 +471,12 @@ public class MutableColumnFamilyOptions {
     @Override
     public MutableColumnFamilyOptionsBuilder setCompressionType(
         final CompressionType compressionType) {
-      return setEnum(MiscOption.compression_type, compressionType);
+      return setEnum(MiscOption.compression, compressionType);
     }
 
     @Override
     public CompressionType compressionType() {
-      return (CompressionType)getEnum(MiscOption.compression_type);
+      return (CompressionType) getEnum(MiscOption.compression);
     }
 
     @Override
@@ -992,6 +488,136 @@ public class MutableColumnFamilyOptions {
     @Override
     public boolean reportBgIoStats() {
       return getBoolean(MiscOption.report_bg_io_stats);
+    }
+
+    @Override
+    public MutableColumnFamilyOptionsBuilder setTtl(final long ttl) {
+      return setLong(CompactionOption.ttl, ttl);
+    }
+
+    @Override
+    public long ttl() {
+      return getLong(CompactionOption.ttl);
+    }
+
+    @Override
+    public MutableColumnFamilyOptionsBuilder setPeriodicCompactionSeconds(
+        final long periodicCompactionSeconds) {
+      return setLong(CompactionOption.periodic_compaction_seconds, periodicCompactionSeconds);
+    }
+
+    @Override
+    public long periodicCompactionSeconds() {
+      return getLong(CompactionOption.periodic_compaction_seconds);
+    }
+
+    @Override
+    public MutableColumnFamilyOptionsBuilder setEnableBlobFiles(final boolean enableBlobFiles) {
+      return setBoolean(BlobOption.enable_blob_files, enableBlobFiles);
+    }
+
+    @Override
+    public boolean enableBlobFiles() {
+      return getBoolean(BlobOption.enable_blob_files);
+    }
+
+    @Override
+    public MutableColumnFamilyOptionsBuilder setMinBlobSize(final long minBlobSize) {
+      return setLong(BlobOption.min_blob_size, minBlobSize);
+    }
+
+    @Override
+    public long minBlobSize() {
+      return getLong(BlobOption.min_blob_size);
+    }
+
+    @Override
+    public MutableColumnFamilyOptionsBuilder setBlobFileSize(final long blobFileSize) {
+      return setLong(BlobOption.blob_file_size, blobFileSize);
+    }
+
+    @Override
+    public long blobFileSize() {
+      return getLong(BlobOption.blob_file_size);
+    }
+
+    @Override
+    public MutableColumnFamilyOptionsBuilder setBlobCompressionType(
+        final CompressionType compressionType) {
+      return setEnum(BlobOption.blob_compression_type, compressionType);
+    }
+
+    @Override
+    public CompressionType blobCompressionType() {
+      return (CompressionType) getEnum(BlobOption.blob_compression_type);
+    }
+
+    @Override
+    public MutableColumnFamilyOptionsBuilder setEnableBlobGarbageCollection(
+        final boolean enableBlobGarbageCollection) {
+      return setBoolean(BlobOption.enable_blob_garbage_collection, enableBlobGarbageCollection);
+    }
+
+    @Override
+    public boolean enableBlobGarbageCollection() {
+      return getBoolean(BlobOption.enable_blob_garbage_collection);
+    }
+
+    @Override
+    public MutableColumnFamilyOptionsBuilder setBlobGarbageCollectionAgeCutoff(
+        final double blobGarbageCollectionAgeCutoff) {
+      return setDouble(
+          BlobOption.blob_garbage_collection_age_cutoff, blobGarbageCollectionAgeCutoff);
+    }
+
+    @Override
+    public double blobGarbageCollectionAgeCutoff() {
+      return getDouble(BlobOption.blob_garbage_collection_age_cutoff);
+    }
+
+    @Override
+    public MutableColumnFamilyOptionsBuilder setBlobGarbageCollectionForceThreshold(
+        final double blobGarbageCollectionForceThreshold) {
+      return setDouble(
+          BlobOption.blob_garbage_collection_force_threshold, blobGarbageCollectionForceThreshold);
+    }
+
+    @Override
+    public double blobGarbageCollectionForceThreshold() {
+      return getDouble(BlobOption.blob_garbage_collection_force_threshold);
+    }
+
+    @Override
+    public MutableColumnFamilyOptionsBuilder setBlobCompactionReadaheadSize(
+        final long blobCompactionReadaheadSize) {
+      return setLong(BlobOption.blob_compaction_readahead_size, blobCompactionReadaheadSize);
+    }
+
+    @Override
+    public long blobCompactionReadaheadSize() {
+      return getLong(BlobOption.blob_compaction_readahead_size);
+    }
+
+    @Override
+    public MutableColumnFamilyOptionsBuilder setBlobFileStartingLevel(
+        final int blobFileStartingLevel) {
+      return setInt(BlobOption.blob_file_starting_level, blobFileStartingLevel);
+    }
+
+    @Override
+    public int blobFileStartingLevel() {
+      return getInt(BlobOption.blob_file_starting_level);
+    }
+
+    @Override
+    public MutableColumnFamilyOptionsBuilder setPrepopulateBlobCache(
+        final PrepopulateBlobCache prepopulateBlobCache) {
+      return setEnum(BlobOption.prepopulate_blob_cache, prepopulateBlobCache);
+    }
+
+    @Override
+    public PrepopulateBlobCache prepopulateBlobCache() {
+      return (PrepopulateBlobCache) getEnum(BlobOption.prepopulate_blob_cache);
     }
   }
 }

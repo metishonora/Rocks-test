@@ -4,12 +4,13 @@
 //  (found in the LICENSE.Apache file in the root directory).
 //
 // This file implements the "bridge" between Java and C++ for
-// rocksdb::CompressionOptions.
+// ROCKSDB_NAMESPACE::CompressionOptions.
 
 #include <jni.h>
 
 #include "include/org_rocksdb_CompressionOptions.h"
 #include "rocksdb/advanced_options.h"
+#include "rocksjni/cplusplus_to_java_convert.h"
 
 /*
  * Class:     org_rocksdb_CompressionOptions
@@ -17,9 +18,9 @@
  * Signature: ()J
  */
 jlong Java_org_rocksdb_CompressionOptions_newCompressionOptions(
-    JNIEnv* env, jclass jcls) {
-  const auto* opt = new rocksdb::CompressionOptions();
-  return reinterpret_cast<jlong>(opt);
+    JNIEnv*, jclass) {
+  const auto* opt = new ROCKSDB_NAMESPACE::CompressionOptions();
+  return GET_CPLUSPLUS_POINTER(opt);
 }
 
 /*
@@ -28,8 +29,8 @@ jlong Java_org_rocksdb_CompressionOptions_newCompressionOptions(
  * Signature: (JI)V
  */
 void Java_org_rocksdb_CompressionOptions_setWindowBits(
-    JNIEnv* env, jobject jobj, jlong jhandle, jint jwindow_bits) {
-  auto* opt = reinterpret_cast<rocksdb::CompressionOptions*>(jhandle);
+    JNIEnv*, jobject, jlong jhandle, jint jwindow_bits) {
+  auto* opt = reinterpret_cast<ROCKSDB_NAMESPACE::CompressionOptions*>(jhandle);
   opt->window_bits = static_cast<int>(jwindow_bits);
 }
 
@@ -39,8 +40,8 @@ void Java_org_rocksdb_CompressionOptions_setWindowBits(
  * Signature: (J)I
  */
 jint Java_org_rocksdb_CompressionOptions_windowBits(
-    JNIEnv* env, jobject jobj, jlong jhandle) {
-  auto* opt = reinterpret_cast<rocksdb::CompressionOptions*>(jhandle);
+    JNIEnv*, jobject, jlong jhandle) {
+  auto* opt = reinterpret_cast<ROCKSDB_NAMESPACE::CompressionOptions*>(jhandle);
   return static_cast<jint>(opt->window_bits);
 }
 
@@ -50,8 +51,8 @@ jint Java_org_rocksdb_CompressionOptions_windowBits(
  * Signature: (JI)V
  */
 void Java_org_rocksdb_CompressionOptions_setLevel(
-    JNIEnv* env, jobject jobj, jlong jhandle, jint jlevel) {
-  auto* opt = reinterpret_cast<rocksdb::CompressionOptions*>(jhandle);
+    JNIEnv*, jobject, jlong jhandle, jint jlevel) {
+  auto* opt = reinterpret_cast<ROCKSDB_NAMESPACE::CompressionOptions*>(jhandle);
   opt->level = static_cast<int>(jlevel);
 }
 
@@ -61,8 +62,8 @@ void Java_org_rocksdb_CompressionOptions_setLevel(
  * Signature: (J)I
  */
 jint Java_org_rocksdb_CompressionOptions_level(
-    JNIEnv* env, jobject jobj, jlong jhandle) {
-  auto* opt = reinterpret_cast<rocksdb::CompressionOptions*>(jhandle);
+    JNIEnv*, jobject, jlong jhandle) {
+  auto* opt = reinterpret_cast<ROCKSDB_NAMESPACE::CompressionOptions*>(jhandle);
   return static_cast<jint>(opt->level);
 }
 
@@ -72,8 +73,8 @@ jint Java_org_rocksdb_CompressionOptions_level(
  * Signature: (JI)V
  */
 void Java_org_rocksdb_CompressionOptions_setStrategy(
-    JNIEnv* env, jobject jobj, jlong jhandle, jint jstrategy) {
-  auto* opt = reinterpret_cast<rocksdb::CompressionOptions*>(jhandle);
+    JNIEnv*, jobject, jlong jhandle, jint jstrategy) {
+  auto* opt = reinterpret_cast<ROCKSDB_NAMESPACE::CompressionOptions*>(jhandle);
   opt->strategy = static_cast<int>(jstrategy);
 }
 
@@ -83,8 +84,8 @@ void Java_org_rocksdb_CompressionOptions_setStrategy(
  * Signature: (J)I
  */
 jint Java_org_rocksdb_CompressionOptions_strategy(
-    JNIEnv* env, jobject jobj, jlong jhandle) {
-  auto* opt = reinterpret_cast<rocksdb::CompressionOptions*>(jhandle);
+    JNIEnv*, jobject, jlong jhandle) {
+  auto* opt = reinterpret_cast<ROCKSDB_NAMESPACE::CompressionOptions*>(jhandle);
   return static_cast<jint>(opt->strategy);
 }
 
@@ -94,9 +95,9 @@ jint Java_org_rocksdb_CompressionOptions_strategy(
  * Signature: (JI)V
  */
 void Java_org_rocksdb_CompressionOptions_setMaxDictBytes(
-    JNIEnv* env, jobject jobj, jlong jhandle, jint jmax_dict_bytes) {
-  auto* opt = reinterpret_cast<rocksdb::CompressionOptions*>(jhandle);
-  opt->max_dict_bytes = static_cast<int>(jmax_dict_bytes);
+    JNIEnv*, jobject, jlong jhandle, jint jmax_dict_bytes) {
+  auto* opt = reinterpret_cast<ROCKSDB_NAMESPACE::CompressionOptions*>(jhandle);
+  opt->max_dict_bytes = static_cast<uint32_t>(jmax_dict_bytes);
 }
 
 /*
@@ -105,17 +106,105 @@ void Java_org_rocksdb_CompressionOptions_setMaxDictBytes(
  * Signature: (J)I
  */
 jint Java_org_rocksdb_CompressionOptions_maxDictBytes(
-    JNIEnv* env, jobject jobj, jlong jhandle) {
-  auto* opt = reinterpret_cast<rocksdb::CompressionOptions*>(jhandle);
+    JNIEnv*, jobject, jlong jhandle) {
+  auto* opt = reinterpret_cast<ROCKSDB_NAMESPACE::CompressionOptions*>(jhandle);
   return static_cast<jint>(opt->max_dict_bytes);
 }
 
+/*
+ * Class:     org_rocksdb_CompressionOptions
+ * Method:    setZstdMaxTrainBytes
+ * Signature: (JI)V
+ */
+void Java_org_rocksdb_CompressionOptions_setZstdMaxTrainBytes(
+    JNIEnv*, jobject, jlong jhandle, jint jzstd_max_train_bytes) {
+  auto* opt = reinterpret_cast<ROCKSDB_NAMESPACE::CompressionOptions*>(jhandle);
+  opt->zstd_max_train_bytes = static_cast<uint32_t>(jzstd_max_train_bytes);
+}
+
+/*
+ * Class:     org_rocksdb_CompressionOptions
+ * Method:    zstdMaxTrainBytes
+ * Signature: (J)I
+ */
+jint Java_org_rocksdb_CompressionOptions_zstdMaxTrainBytes(
+    JNIEnv *, jobject, jlong jhandle) {
+  auto* opt = reinterpret_cast<ROCKSDB_NAMESPACE::CompressionOptions*>(jhandle);
+  return static_cast<jint>(opt->zstd_max_train_bytes);
+}
+
+/*
+ * Class:     org_rocksdb_CompressionOptions
+ * Method:    setMaxDictBufferBytes
+ * Signature: (JJ)V
+ */
+void Java_org_rocksdb_CompressionOptions_setMaxDictBufferBytes(
+    JNIEnv*, jobject, jlong jhandle, jlong jmax_dict_buffer_bytes) {
+  auto* opt = reinterpret_cast<ROCKSDB_NAMESPACE::CompressionOptions*>(jhandle);
+  opt->max_dict_buffer_bytes = static_cast<uint64_t>(jmax_dict_buffer_bytes);
+}
+
+/*
+ * Class:     org_rocksdb_CompressionOptions
+ * Method:    maxDictBufferBytes
+ * Signature: (J)J
+ */
+jlong Java_org_rocksdb_CompressionOptions_maxDictBufferBytes(JNIEnv*, jobject,
+                                                             jlong jhandle) {
+  auto* opt = reinterpret_cast<ROCKSDB_NAMESPACE::CompressionOptions*>(jhandle);
+  return static_cast<jlong>(opt->max_dict_buffer_bytes);
+}
+
+/*
+ * Class:     org_rocksdb_CompressionOptions
+ * Method:    setZstdMaxTrainBytes
+ * Signature: (JZ)V
+ */
+void Java_org_rocksdb_CompressionOptions_setUseZstdDictTrainer(
+    JNIEnv*, jobject, jlong jhandle, jboolean juse_zstd_dict_trainer) {
+  auto* opt = reinterpret_cast<ROCKSDB_NAMESPACE::CompressionOptions*>(jhandle);
+  opt->use_zstd_dict_trainer = juse_zstd_dict_trainer == JNI_TRUE;
+}
+
+/*
+ * Class:     org_rocksdb_CompressionOptions
+ * Method:    zstdMaxTrainBytes
+ * Signature: (J)Z
+ */
+jboolean Java_org_rocksdb_CompressionOptions_useZstdDictTrainer(JNIEnv*,
+                                                                jobject,
+                                                                jlong jhandle) {
+  auto* opt = reinterpret_cast<ROCKSDB_NAMESPACE::CompressionOptions*>(jhandle);
+  return static_cast<bool>(opt->use_zstd_dict_trainer);
+}
+
+/*
+ * Class:     org_rocksdb_CompressionOptions
+ * Method:    setEnabled
+ * Signature: (JZ)V
+ */
+void Java_org_rocksdb_CompressionOptions_setEnabled(
+    JNIEnv*, jobject, jlong jhandle, jboolean jenabled) {
+  auto* opt = reinterpret_cast<ROCKSDB_NAMESPACE::CompressionOptions*>(jhandle);
+  opt->enabled = jenabled == JNI_TRUE;
+}
+
+/*
+ * Class:     org_rocksdb_CompressionOptions
+ * Method:    enabled
+ * Signature: (J)Z
+ */
+jboolean Java_org_rocksdb_CompressionOptions_enabled(
+    JNIEnv*, jobject, jlong jhandle) {
+  auto* opt = reinterpret_cast<ROCKSDB_NAMESPACE::CompressionOptions*>(jhandle);
+  return static_cast<bool>(opt->enabled);
+}
 /*
  * Class:     org_rocksdb_CompressionOptions
  * Method:    disposeInternal
  * Signature: (J)V
  */
 void Java_org_rocksdb_CompressionOptions_disposeInternal(
-    JNIEnv* env, jobject jobj, jlong jhandle) {
-  delete reinterpret_cast<rocksdb::CompressionOptions*>(jhandle);
+    JNIEnv*, jobject, jlong jhandle) {
+  delete reinterpret_cast<ROCKSDB_NAMESPACE::CompressionOptions*>(jhandle);
 }

@@ -1,3 +1,4 @@
+// Copyright (c) Facebook, Inc. and its affiliates. All Rights Reserved.
 // Copyright (c) 2011 The LevelDB Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file. See the AUTHORS file for names of contributors.
@@ -6,19 +7,25 @@
 
 #include <map>
 #include <memory>
+
 #include "rocksdb/compaction_filter.h"
+#include "rocksdb/convenience.h"
+#include "rocksdb/merge_operator.h"
 #include "rocksdb/utilities/db_ttl.h"
+#include "rocksdb/utilities/object_registry.h"
+#include "test_util/testharness.h"
 #include "util/string_util.h"
-#include "util/testharness.h"
+#include "utilities/merge_operators/bytesxor.h"
+#include "utilities/ttl/db_ttl_impl.h"
 #ifndef OS_WIN
 #include <unistd.h>
 #endif
 
-namespace rocksdb {
+namespace ROCKSDB_NAMESPACE {
 
 namespace {
 
-typedef std::map<std::string, std::string> KVMap;
+using KVMap = std::map<std::string, std::string>;
 
 enum BatchOperation { OP_PUT = 0, OP_DELETE = 1 };
 }
@@ -26,11 +33,11 @@ enum BatchOperation { OP_PUT = 0, OP_DELETE = 1 };
 class SpecialTimeEnv : public EnvWrapper {
  public:
   explicit SpecialTimeEnv(Env* base) : EnvWrapper(base) {
-    base->GetCurrentTime(&current_time_);
+    EXPECT_OK(base->GetCurrentTime(&current_time_));
   }
-
+  const char* Name() const override { return "SpecialTimeEnv"; }
   void Sleep(int64_t sleep_time) { current_time_ += sleep_time; }
-  virtual Status GetCurrentTime(int64_t* current_time) override {
+  Status GetCurrentTime(int64_t* current_time) override {
     *current_time = current_time_;
     return Status::OK();
   }
@@ -43,19 +50,19 @@ class TtlTest : public testing::Test {
  public:
   TtlTest() {
     env_.reset(new SpecialTimeEnv(Env::Default()));
-    dbname_ = test::TmpDir() + "/db_ttl";
+    dbname_ = test::PerThreadDBPath("db_ttl");
     options_.create_if_missing = true;
     options_.env = env_.get();
     // ensure that compaction is kicked in to always strip timestamp from kvs
     options_.max_compaction_bytes = 1;
     // compaction should take place always from level0 for determinism
     db_ttl_ = nullptr;
-    DestroyDB(dbname_, Options());
+    EXPECT_OK(DestroyDB(dbname_, Options()));
   }
 
-  ~TtlTest() {
+  ~TtlTest() override {
     CloseTtl();
-    DestroyDB(dbname_, Options());
+    EXPECT_OK(DestroyDB(dbname_, Options()));
   }
 
   // Open database with TTL support when TTL not provided with db_ttl_ pointer
@@ -85,9 +92,20 @@ class TtlTest : public testing::Test {
     ASSERT_OK(DBWithTTL::Open(options_, dbname_, &db_ttl_, ttl, true));
   }
 
-  void CloseTtl() {
-    delete db_ttl_;
-    db_ttl_ = nullptr;
+  // Call db_ttl_->Close() before delete db_ttl_
+  void CloseTtl() { CloseTtlHelper(true); }
+
+  // No db_ttl_->Close() before delete db_ttl_
+  void CloseTtlNoDBClose() { CloseTtlHelper(false); }
+
+  void CloseTtlHelper(bool close_db) {
+    if (db_ttl_ != nullptr) {
+      if (close_db) {
+        EXPECT_OK(db_ttl_->Close());
+      }
+      delete db_ttl_;
+      db_ttl_ = nullptr;
+    }
   }
 
   // Populates and returns a kv-map
@@ -125,17 +143,17 @@ class TtlTest : public testing::Test {
     for (int64_t i = 0; i < num_ops && kv_it_ != kvmap_.end(); i++, ++kv_it_) {
       switch (batch_ops[i]) {
         case OP_PUT:
-          batch.Put(kv_it_->first, kv_it_->second);
+          ASSERT_OK(batch.Put(kv_it_->first, kv_it_->second));
           break;
         case OP_DELETE:
-          batch.Delete(kv_it_->first);
+          ASSERT_OK(batch.Delete(kv_it_->first));
           break;
         default:
-          ASSERT_TRUE(false);
+          FAIL();
       }
     }
-    db_ttl_->Write(wopts, &batch);
-    db_ttl_->Flush(flush_opts);
+    ASSERT_OK(db_ttl_->Write(wopts, &batch));
+    ASSERT_OK(db_ttl_->Flush(flush_opts));
   }
 
   // Puts num_entries starting from start_pos_map from kvmap_ into the database
@@ -158,20 +176,33 @@ class TtlTest : public testing::Test {
                             : db_ttl_->Put(wopts, cf, "keymock", "valuemock"));
     if (flush) {
       if (cf == nullptr) {
-        db_ttl_->Flush(flush_opts);
+        ASSERT_OK(db_ttl_->Flush(flush_opts));
       } else {
-        db_ttl_->Flush(flush_opts, cf);
+        ASSERT_OK(db_ttl_->Flush(flush_opts, cf));
       }
     }
   }
 
   // Runs a manual compaction
-  void ManualCompact(ColumnFamilyHandle* cf = nullptr) {
+  Status ManualCompact(ColumnFamilyHandle* cf = nullptr) {
+    assert(db_ttl_);
     if (cf == nullptr) {
-      db_ttl_->CompactRange(CompactRangeOptions(), nullptr, nullptr);
+      return db_ttl_->CompactRange(CompactRangeOptions(), nullptr, nullptr);
     } else {
-      db_ttl_->CompactRange(CompactRangeOptions(), cf, nullptr, nullptr);
+      return db_ttl_->CompactRange(CompactRangeOptions(), cf, nullptr, nullptr);
     }
+  }
+
+  // Runs a DeleteRange
+  void MakeDeleteRange(std::string start, std::string end,
+                       ColumnFamilyHandle* cf = nullptr) {
+    ASSERT_TRUE(db_ttl_);
+    static WriteOptions wops;
+    WriteBatch wb;
+    ASSERT_OK(cf == nullptr
+                  ? wb.DeleteRange(db_ttl_->DefaultColumnFamily(), start, end)
+                  : wb.DeleteRange(cf, start, end));
+    ASSERT_OK(db_ttl_->Write(wops, &wb));
   }
 
   // checks the whole kvmap_ to return correct values using KeyMayExist
@@ -184,12 +215,12 @@ class TtlTest : public testing::Test {
       if (ret == false || value_found == false) {
         fprintf(stderr, "KeyMayExist could not find key=%s in the database but"
                         " should have\n", kv.first.c_str());
-        ASSERT_TRUE(false);
+        FAIL();
       } else if (val.compare(kv.second) != 0) {
         fprintf(stderr, " value for key=%s present in database is %s but"
                         " should be %s\n", kv.first.c_str(), val.c_str(),
                         kv.second.c_str());
-        ASSERT_TRUE(false);
+        FAIL();
       }
     }
   }
@@ -213,18 +244,9 @@ class TtlTest : public testing::Test {
     }
   }
 
-  // Sleeps for slp_tim then runs a manual compaction
-  // Checks span starting from st_pos from kvmap_ in the db and
-  // Gets should return true if check is true and false otherwise
-  // Also checks that value that we got is the same as inserted; and =kNewValue
-  //   if test_compaction_change is true
-  void SleepCompactCheck(int slp_tim, int64_t st_pos, int64_t span,
-                         bool check = true, bool test_compaction_change = false,
-                         ColumnFamilyHandle* cf = nullptr) {
-    ASSERT_TRUE(db_ttl_);
-
-    env_->Sleep(slp_tim);
-    ManualCompact(cf);
+  void CompactCheck(int64_t st_pos, int64_t span, bool check = true,
+                    bool test_compaction_change = false,
+                    ColumnFamilyHandle* cf = nullptr) {
     static ReadOptions ropts;
     kv_it_ = kvmap_.begin();
     advance(kv_it_, st_pos);
@@ -239,21 +261,35 @@ class TtlTest : public testing::Test {
         } else {
           fprintf(stderr, "is present in db but was expected to be absent\n");
         }
-        ASSERT_TRUE(false);
+        FAIL();
       } else if (s.ok()) {
           if (test_compaction_change && v.compare(kNewValue_) != 0) {
             fprintf(stderr, " value for key=%s present in database is %s but "
                             " should be %s\n", kv_it_->first.c_str(), v.c_str(),
                             kNewValue_.c_str());
-            ASSERT_TRUE(false);
+            FAIL();
           } else if (!test_compaction_change && v.compare(kv_it_->second) !=0) {
             fprintf(stderr, " value for key=%s present in database is %s but "
                             " should be %s\n", kv_it_->first.c_str(), v.c_str(),
                             kv_it_->second.c_str());
-            ASSERT_TRUE(false);
+            FAIL();
           }
       }
     }
+  }
+  // Sleeps for slp_tim then runs a manual compaction
+  // Checks span starting from st_pos from kvmap_ in the db and
+  // Gets should return true if check is true and false otherwise
+  // Also checks that value that we got is the same as inserted; and =kNewValue
+  //   if test_compaction_change is true
+  void SleepCompactCheck(int slp_tim, int64_t st_pos, int64_t span,
+                         bool check = true, bool test_compaction_change = false,
+                         ColumnFamilyHandle* cf = nullptr) {
+    ASSERT_TRUE(db_ttl_);
+
+    env_->Sleep(slp_tim);
+    ASSERT_OK(ManualCompact(cf));
+    CompactCheck(st_pos, span, check, test_compaction_change, cf);
   }
 
   // Similar as SleepCompactCheck but uses TtlIterator to read from db
@@ -261,7 +297,7 @@ class TtlTest : public testing::Test {
                              bool check = true) {
     ASSERT_TRUE(db_ttl_);
     env_->Sleep(slp);
-    ManualCompact();
+    ASSERT_OK(ManualCompact());
     static ReadOptions ropts;
     Iterator *dbiter = db_ttl_->NewIterator(ropts);
     kv_it_ = kvmap_.begin();
@@ -280,7 +316,14 @@ class TtlTest : public testing::Test {
         dbiter->Next();
       }
     }
+    ASSERT_OK(dbiter->status());
     delete dbiter;
+  }
+
+  // Set ttl on open db
+  void SetTtl(int32_t ttl, ColumnFamilyHandle* cf = nullptr) {
+    ASSERT_TRUE(db_ttl_);
+    cf == nullptr ? db_ttl_->SetTtl(ttl) : db_ttl_->SetTtl(cf, ttl);
   }
 
   class TestFilter : public CompactionFilter {
@@ -295,9 +338,8 @@ class TtlTest : public testing::Test {
     // Keeps key if it is in [kSampleSize_/3, 2*kSampleSize_/3),
     // Change value if it is in [2*kSampleSize_/3, kSampleSize_)
     // Eg. kSampleSize_=6. Drop:key0-1...Keep:key2-3...Change:key4-5...
-    virtual bool Filter(int level, const Slice& key,
-                        const Slice& value, std::string* new_value,
-                        bool* value_changed) const override {
+    bool Filter(int /*level*/, const Slice& key, const Slice& /*value*/,
+                std::string* new_value, bool* value_changed) const override {
       assert(new_value != nullptr);
 
       std::string search_str = "0123456789";
@@ -328,9 +370,7 @@ class TtlTest : public testing::Test {
       }
     }
 
-    virtual const char* Name() const override {
-      return "TestFilter";
-    }
+    const char* Name() const override { return "TestFilter"; }
 
    private:
     const int64_t kSampleSize_;
@@ -344,17 +384,15 @@ class TtlTest : public testing::Test {
           kNewValue_(kNewValue) {
       }
 
-      virtual std::unique_ptr<CompactionFilter> CreateCompactionFilter(
-          const CompactionFilter::Context& context) override {
+      std::unique_ptr<CompactionFilter> CreateCompactionFilter(
+          const CompactionFilter::Context& /*context*/) override {
         return std::unique_ptr<CompactionFilter>(
             new TestFilter(kSampleSize_, kNewValue_));
       }
 
-      virtual const char* Name() const override {
-        return "TestFilterFactory";
-      }
+      const char* Name() const override { return "TestFilterFactory"; }
 
-    private:
+     private:
       const int64_t kSampleSize_;
       const std::string kNewValue_;
   };
@@ -364,14 +402,14 @@ class TtlTest : public testing::Test {
   static const int64_t kSampleSize_ = 100;
   std::string dbname_;
   DBWithTTL* db_ttl_;
-  unique_ptr<SpecialTimeEnv> env_;
+  std::unique_ptr<SpecialTimeEnv> env_;
 
  private:
   Options options_;
   KVMap kvmap_;
   KVMap::iterator kv_it_;
   const std::string kNewValue_ = "new_value";
-  unique_ptr<CompactionFilter> test_comp_filter_;
+  std::unique_ptr<CompactionFilter> test_comp_filter_;
 }; // class TtlTest
 
 // If TTL is non positive or not provided, the behaviour is TTL = infinity
@@ -397,6 +435,29 @@ TEST_F(TtlTest, NoEffect) {
   PutValues(boundary2, kSampleSize_ - boundary2); //T=3: Set3 never deleted
   SleepCompactCheck(1, 0, kSampleSize_, true);    //T=4: Sets 1,2,3 still there
   CloseTtl();
+}
+
+// Rerun the NoEffect test with a different version of CloseTtl
+// function, where db is directly deleted without close.
+TEST_F(TtlTest, DestructWithoutClose) {
+  MakeKVMap(kSampleSize_);
+  int64_t boundary1 = kSampleSize_ / 3;
+  int64_t boundary2 = 2 * boundary1;
+
+  OpenTtl();
+  PutValues(0, boundary1);             // T=0: Set1 never deleted
+  SleepCompactCheck(1, 0, boundary1);  // T=1: Set1 still there
+  CloseTtlNoDBClose();
+
+  OpenTtl(0);
+  PutValues(boundary1, boundary2 - boundary1);  // T=1: Set2 never deleted
+  SleepCompactCheck(1, 0, boundary2);           // T=2: Sets1 & 2 still there
+  CloseTtlNoDBClose();
+
+  OpenTtl(-1);
+  PutValues(boundary2, kSampleSize_ - boundary2);  // T=3: Set3 never deleted
+  SleepCompactCheck(1, 0, kSampleSize_, true);  // T=4: Sets 1,2,3 still there
+  CloseTtlNoDBClose();
 }
 
 // Puts a set of values and checks its presence using Get during ttl
@@ -498,11 +559,16 @@ TEST_F(TtlTest, ReadOnlyPresentForever) {
   MakeKVMap(kSampleSize_);
 
   OpenTtl(1);                                 // T=0:Open the db normally
-  PutValues(0, kSampleSize_);                  // T=0:Insert Set1. Delete at t=1
+  PutValues(0, kSampleSize_);                 // T=0:Insert Set1. Delete at t=1
   CloseTtl();
 
   OpenReadOnlyTtl(1);
-  SleepCompactCheck(2, 0, kSampleSize_);       // T=2:Set1 should still be there
+  ASSERT_TRUE(db_ttl_);
+
+  env_->Sleep(2);
+  Status s = ManualCompact();  // T=2:Set1 should still be there
+  ASSERT_TRUE(s.IsNotSupported());
+  CompactCheck(0, kSampleSize_);
   CloseTtl();
 }
 
@@ -626,7 +692,206 @@ TEST_F(TtlTest, ColumnFamiliesTest) {
   db_ttl_ = nullptr;
 }
 
-} //  namespace rocksdb
+// Puts a set of values and checks its absence using Get after ttl
+TEST_F(TtlTest, ChangeTtlOnOpenDb) {
+  MakeKVMap(kSampleSize_);
+
+  OpenTtl(1);                                  // T=0:Open the db with ttl = 2
+  SetTtl(3);
+  PutValues(0, kSampleSize_);                  // T=0:Insert Set1. Delete at t=2
+  SleepCompactCheck(2, 0, kSampleSize_, true); // T=2:Set1 should be there
+  CloseTtl();
+}
+
+// Test DeleteRange for DBWithTtl
+TEST_F(TtlTest, DeleteRangeTest) {
+  OpenTtl();
+  ASSERT_OK(db_ttl_->Put(WriteOptions(), "a", "val"));
+  MakeDeleteRange("a", "b");
+  ASSERT_OK(db_ttl_->Put(WriteOptions(), "c", "val"));
+  MakeDeleteRange("b", "d");
+  ASSERT_OK(db_ttl_->Put(WriteOptions(), "e", "val"));
+  MakeDeleteRange("d", "e");
+  // first iteration verifies query correctness in memtable, second verifies
+  // query correctness for a single SST file
+  for (int i = 0; i < 2; i++) {
+    if (i > 0) {
+      ASSERT_OK(db_ttl_->Flush(FlushOptions()));
+    }
+    std::string value;
+    ASSERT_TRUE(db_ttl_->Get(ReadOptions(), "a", &value).IsNotFound());
+    ASSERT_TRUE(db_ttl_->Get(ReadOptions(), "c", &value).IsNotFound());
+    ASSERT_OK(db_ttl_->Get(ReadOptions(), "e", &value));
+  }
+  CloseTtl();
+}
+
+class DummyFilter : public CompactionFilter {
+ public:
+  bool Filter(int /*level*/, const Slice& /*key*/, const Slice& /*value*/,
+              std::string* /*new_value*/,
+              bool* /*value_changed*/) const override {
+    return false;
+  }
+
+  const char* Name() const override { return kClassName(); }
+  static const char* kClassName() { return "DummyFilter"; }
+};
+
+class DummyFilterFactory : public CompactionFilterFactory {
+ public:
+  const char* Name() const override { return kClassName(); }
+  static const char* kClassName() { return "DummyFilterFactory"; }
+
+  std::unique_ptr<CompactionFilter> CreateCompactionFilter(
+      const CompactionFilter::Context&) override {
+    std::unique_ptr<CompactionFilter> f(new DummyFilter());
+    return f;
+  }
+};
+
+static int RegisterTestObjects(ObjectLibrary& library,
+                               const std::string& /*arg*/) {
+  library.AddFactory<CompactionFilter>(
+      "DummyFilter", [](const std::string& /*uri*/,
+                        std::unique_ptr<CompactionFilter>* /*guard*/,
+                        std::string* /* errmsg */) {
+        static DummyFilter dummy;
+        return &dummy;
+      });
+  library.AddFactory<CompactionFilterFactory>(
+      "DummyFilterFactory", [](const std::string& /*uri*/,
+                               std::unique_ptr<CompactionFilterFactory>* guard,
+                               std::string* /* errmsg */) {
+        guard->reset(new DummyFilterFactory());
+        return guard->get();
+      });
+  return 2;
+}
+
+class TtlOptionsTest : public testing::Test {
+ public:
+  TtlOptionsTest() {
+    config_options_.registry->AddLibrary("RegisterTtlObjects",
+                                         RegisterTtlObjects, "");
+    config_options_.registry->AddLibrary("RegisterTtlTestObjects",
+                                         RegisterTestObjects, "");
+  }
+  ConfigOptions config_options_;
+};
+
+TEST_F(TtlOptionsTest, LoadTtlCompactionFilter) {
+  const CompactionFilter* filter = nullptr;
+
+  ASSERT_OK(CompactionFilter::CreateFromString(
+      config_options_, TtlCompactionFilter::kClassName(), &filter));
+  ASSERT_NE(filter, nullptr);
+  ASSERT_STREQ(filter->Name(), TtlCompactionFilter::kClassName());
+  auto ttl = filter->GetOptions<int32_t>("TTL");
+  ASSERT_NE(ttl, nullptr);
+  ASSERT_EQ(*ttl, 0);
+  ASSERT_OK(filter->ValidateOptions(DBOptions(), ColumnFamilyOptions()));
+  delete filter;
+  filter = nullptr;
+
+  ASSERT_OK(CompactionFilter::CreateFromString(
+      config_options_, "id=TtlCompactionFilter; ttl=123", &filter));
+  ASSERT_NE(filter, nullptr);
+  ttl = filter->GetOptions<int32_t>("TTL");
+  ASSERT_NE(ttl, nullptr);
+  ASSERT_EQ(*ttl, 123);
+  ASSERT_OK(filter->ValidateOptions(DBOptions(), ColumnFamilyOptions()));
+  delete filter;
+  filter = nullptr;
+
+  ASSERT_OK(CompactionFilter::CreateFromString(
+      config_options_,
+      "id=TtlCompactionFilter; ttl=456; user_filter=DummyFilter;", &filter));
+  ASSERT_NE(filter, nullptr);
+  auto inner = filter->CheckedCast<DummyFilter>();
+  ASSERT_NE(inner, nullptr);
+  ASSERT_OK(filter->ValidateOptions(DBOptions(), ColumnFamilyOptions()));
+  std::string mismatch;
+  std::string opts_str = filter->ToString(config_options_);
+  const CompactionFilter* copy = nullptr;
+  ASSERT_OK(
+      CompactionFilter::CreateFromString(config_options_, opts_str, &copy));
+  ASSERT_TRUE(filter->AreEquivalent(config_options_, copy, &mismatch));
+  delete filter;
+  delete copy;
+}
+
+TEST_F(TtlOptionsTest, LoadTtlCompactionFilterFactory) {
+  std::shared_ptr<CompactionFilterFactory> cff;
+
+  ASSERT_OK(CompactionFilterFactory::CreateFromString(
+      config_options_, TtlCompactionFilterFactory::kClassName(), &cff));
+  ASSERT_NE(cff.get(), nullptr);
+  ASSERT_STREQ(cff->Name(), TtlCompactionFilterFactory::kClassName());
+  auto ttl = cff->GetOptions<int32_t>("TTL");
+  ASSERT_NE(ttl, nullptr);
+  ASSERT_EQ(*ttl, 0);
+  ASSERT_OK(cff->ValidateOptions(DBOptions(), ColumnFamilyOptions()));
+
+  ASSERT_OK(CompactionFilterFactory::CreateFromString(
+      config_options_, "id=TtlCompactionFilterFactory; ttl=123", &cff));
+  ASSERT_NE(cff.get(), nullptr);
+  ASSERT_STREQ(cff->Name(), TtlCompactionFilterFactory::kClassName());
+  ttl = cff->GetOptions<int32_t>("TTL");
+  ASSERT_NE(ttl, nullptr);
+  ASSERT_EQ(*ttl, 123);
+  ASSERT_OK(cff->ValidateOptions(DBOptions(), ColumnFamilyOptions()));
+
+  ASSERT_OK(CompactionFilterFactory::CreateFromString(
+      config_options_,
+      "id=TtlCompactionFilterFactory; ttl=456; "
+      "user_filter_factory=DummyFilterFactory;",
+      &cff));
+  ASSERT_NE(cff.get(), nullptr);
+  auto filter = cff->CreateCompactionFilter(CompactionFilter::Context());
+  ASSERT_NE(filter.get(), nullptr);
+  auto ttlf = filter->CheckedCast<TtlCompactionFilter>();
+  ASSERT_EQ(filter.get(), ttlf);
+  auto user = filter->CheckedCast<DummyFilter>();
+  ASSERT_NE(user, nullptr);
+  ASSERT_OK(cff->ValidateOptions(DBOptions(), ColumnFamilyOptions()));
+
+  std::string opts_str = cff->ToString(config_options_);
+  std::string mismatch;
+  std::shared_ptr<CompactionFilterFactory> copy;
+  ASSERT_OK(CompactionFilterFactory::CreateFromString(config_options_, opts_str,
+                                                      &copy));
+  ASSERT_TRUE(cff->AreEquivalent(config_options_, copy.get(), &mismatch));
+}
+
+TEST_F(TtlOptionsTest, LoadTtlMergeOperator) {
+  std::shared_ptr<MergeOperator> mo;
+
+  config_options_.invoke_prepare_options = false;
+  ASSERT_OK(MergeOperator::CreateFromString(
+      config_options_, TtlMergeOperator::kClassName(), &mo));
+  ASSERT_NE(mo.get(), nullptr);
+  ASSERT_STREQ(mo->Name(), TtlMergeOperator::kClassName());
+  ASSERT_NOK(mo->ValidateOptions(DBOptions(), ColumnFamilyOptions()));
+
+  config_options_.invoke_prepare_options = true;
+  ASSERT_OK(MergeOperator::CreateFromString(
+      config_options_, "id=TtlMergeOperator; user_operator=bytesxor", &mo));
+  ASSERT_NE(mo.get(), nullptr);
+  ASSERT_STREQ(mo->Name(), TtlMergeOperator::kClassName());
+  ASSERT_OK(mo->ValidateOptions(DBOptions(), ColumnFamilyOptions()));
+  auto ttl_mo = mo->CheckedCast<TtlMergeOperator>();
+  ASSERT_EQ(mo.get(), ttl_mo);
+  auto user = ttl_mo->CheckedCast<BytesXOROperator>();
+  ASSERT_NE(user, nullptr);
+
+  std::string mismatch;
+  std::string opts_str = mo->ToString(config_options_);
+  std::shared_ptr<MergeOperator> copy;
+  ASSERT_OK(MergeOperator::CreateFromString(config_options_, opts_str, &copy));
+  ASSERT_TRUE(mo->AreEquivalent(config_options_, copy.get(), &mismatch));
+}
+}  // namespace ROCKSDB_NAMESPACE
 
 // A black-box test for the ttl wrapper around rocksdb
 int main(int argc, char** argv) {
@@ -637,7 +902,7 @@ int main(int argc, char** argv) {
 #else
 #include <stdio.h>
 
-int main(int argc, char** argv) {
+int main(int /*argc*/, char** /*argv*/) {
   fprintf(stderr, "SKIPPED as DBWithTTL is not supported in ROCKSDB_LITE\n");
   return 0;
 }

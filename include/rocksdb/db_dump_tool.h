@@ -10,21 +10,21 @@
 
 #include "rocksdb/db.h"
 
-namespace rocksdb {
+namespace ROCKSDB_NAMESPACE {
 
 struct DumpOptions {
   // Database that will be dumped
   std::string db_path;
   // File location that will contain dump output
   std::string dump_location;
-  // Dont include db information header in the dump
+  // Don't include db information header in the dump
   bool anonymous = false;
 };
 
 class DbDumpTool {
  public:
   bool Run(const DumpOptions& dump_options,
-           rocksdb::Options options = rocksdb::Options());
+           ROCKSDB_NAMESPACE::Options options = ROCKSDB_NAMESPACE::Options());
 };
 
 struct UndumpOptions {
@@ -39,7 +39,7 @@ struct UndumpOptions {
 class DbUndumpTool {
  public:
   bool Run(const UndumpOptions& undump_options,
-           rocksdb::Options options = rocksdb::Options());
+           ROCKSDB_NAMESPACE::Options options = ROCKSDB_NAMESPACE::Options());
 };
-}  // namespace rocksdb
+}  // namespace ROCKSDB_NAMESPACE
 #endif  // ROCKSDB_LITE

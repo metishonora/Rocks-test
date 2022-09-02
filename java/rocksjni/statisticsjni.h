@@ -1,10 +1,10 @@
 // Copyright (c) 2011-present, Facebook, Inc.  All rights reserved.
-// This source code is licensed under the BSD-style license found in the
-// LICENSE file in the root directory of this source tree. An additional grant
-// of patent rights can be found in the PATENTS file in the same directory.
+//  This source code is licensed under both the GPLv2 (found in the
+//  COPYING file in the root directory) and Apache 2.0 License
+//  (found in the LICENSE.Apache file in the root directory).
 //
 // This file implements the callback "bridge" between Java and C++ for
-// rocksdb::Statistics
+// ROCKSDB_NAMESPACE::Statistics
 
 #ifndef JAVA_ROCKSJNI_STATISTICSJNI_H_
 #define JAVA_ROCKSJNI_STATISTICSJNI_H_
@@ -15,19 +15,19 @@
 #include "rocksdb/statistics.h"
 #include "monitoring/statistics.h"
 
-namespace rocksdb {
+namespace ROCKSDB_NAMESPACE {
 
-  class StatisticsJni : public StatisticsImpl {
-   public:
-     StatisticsJni(std::shared_ptr<Statistics> stats);
-     StatisticsJni(std::shared_ptr<Statistics> stats,
-         const std::set<uint32_t> ignore_histograms);
-     virtual bool HistEnabledForType(uint32_t type) const override;
+class StatisticsJni : public StatisticsImpl {
+ public:
+  StatisticsJni(std::shared_ptr<Statistics> stats);
+  StatisticsJni(std::shared_ptr<Statistics> stats,
+                const std::set<uint32_t> ignore_histograms);
+  virtual bool HistEnabledForType(uint32_t type) const override;
 
-   private:
-     const std::set<uint32_t> m_ignore_histograms;
+ private:
+  const std::set<uint32_t> m_ignore_histograms;
  };
 
-}  // namespace rocksdb
+ }  // namespace ROCKSDB_NAMESPACE
 
 #endif  // JAVA_ROCKSJNI_STATISTICSJNI_H_

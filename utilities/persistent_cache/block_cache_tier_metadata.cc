@@ -8,7 +8,7 @@
 
 #include <functional>
 
-namespace rocksdb {
+namespace ROCKSDB_NAMESPACE {
 
 bool BlockCacheTierMetadata::Insert(BlockCacheFile* file) {
   return cache_file_index_.Insert(file);
@@ -63,7 +63,8 @@ bool BlockCacheTierMetadata::Lookup(const Slice& key, LBA* lba) {
 BlockInfo* BlockCacheTierMetadata::Remove(const Slice& key) {
   BlockInfo lookup_key(key);
   BlockInfo* binfo = nullptr;
-  bool ok __attribute__((__unused__)) = block_index_.Erase(&lookup_key, &binfo);
+  bool ok __attribute__((__unused__));
+  ok = block_index_.Erase(&lookup_key, &binfo);
   assert(ok);
   return binfo;
 }
@@ -80,6 +81,6 @@ void BlockCacheTierMetadata::RemoveAllKeys(BlockCacheFile* f) {
   f->block_infos().clear();
 }
 
-}  // namespace rocksdb
+}  // namespace ROCKSDB_NAMESPACE
 
 #endif

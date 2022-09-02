@@ -3,29 +3,32 @@
 //  COPYING file in the root directory) and Apache 2.0 License
 //  (found in the LICENSE.Apache file in the root directory).
 //
-#ifndef MERGE_HELPER_H
-#define MERGE_HELPER_H
+#pragma once
 
 #include <deque>
 #include <string>
 #include <vector>
 
-#include "db/dbformat.h"
 #include "db/merge_context.h"
 #include "db/range_del_aggregator.h"
+#include "db/snapshot_checker.h"
 #include "rocksdb/compaction_filter.h"
 #include "rocksdb/env.h"
+#include "rocksdb/merge_operator.h"
 #include "rocksdb/slice.h"
 #include "util/stop_watch.h"
 
-namespace rocksdb {
+namespace ROCKSDB_NAMESPACE {
 
 class Comparator;
 class Iterator;
 class Logger;
 class MergeOperator;
 class Statistics;
-class InternalIterator;
+class SystemClock;
+class BlobFetcher;
+class PrefetchBufferCollection;
+struct CompactionIterationStats;
 
 class MergeHelper {
  public:
@@ -33,23 +36,9 @@ class MergeHelper {
               const MergeOperator* user_merge_operator,
               const CompactionFilter* compaction_filter, Logger* logger,
               bool assert_valid_internal_key, SequenceNumber latest_snapshot,
-              int level = 0, Statistics* stats = nullptr,
-              const std::atomic<bool>* shutting_down = nullptr)
-      : env_(env),
-        user_comparator_(user_comparator),
-        user_merge_operator_(user_merge_operator),
-        compaction_filter_(compaction_filter),
-        shutting_down_(shutting_down),
-        logger_(logger),
-        assert_valid_internal_key_(assert_valid_internal_key),
-        latest_snapshot_(latest_snapshot),
-        level_(level),
-        keys_(),
-        filter_timer_(env_),
-        total_filter_time_(0U),
-        stats_(stats) {
-    assert(user_comparator_ != nullptr);
-  }
+              const SnapshotChecker* snapshot_checker = nullptr, int level = 0,
+              Statistics* stats = nullptr,
+              const std::atomic<bool>* shutting_down = nullptr);
 
   // Wrapper around MergeOperator::FullMergeV2() that records perf statistics.
   // Result of merge will be written to result if status returned is OK.
@@ -63,7 +52,7 @@ class MergeHelper {
                                const Slice& key, const Slice* value,
                                const std::vector<Slice>& operands,
                                std::string* result, Logger* logger,
-                               Statistics* statistics, Env* env,
+                               Statistics* statistics, SystemClock* clock,
                                Slice* result_operand = nullptr,
                                bool update_num_ops_stats = false);
 
@@ -81,6 +70,12 @@ class MergeHelper {
   //                   0 means no restriction
   // at_bottom:   (IN) true if the iterator covers the bottem level, which means
   //                   we could reach the start of the history of this user key.
+  // allow_data_in_errors: (IN) if true, data details will be displayed in
+  //                   error/log messages.
+  // blob_fetcher: (IN) blob fetcher object for the compaction's input version.
+  // prefetch_buffers: (IN/OUT) a collection of blob file prefetch buffers
+  //                            used for compaction readahead.
+  // c_iter_stats: (OUT) compaction iteration statistics.
   //
   // Returns one of the following statuses:
   // - OK: Entries were successfully merged.
@@ -93,9 +88,12 @@ class MergeHelper {
   //
   // REQUIRED: The first key in the input is not corrupted.
   Status MergeUntil(InternalIterator* iter,
-                    RangeDelAggregator* range_del_agg = nullptr,
-                    const SequenceNumber stop_before = 0,
-                    const bool at_bottom = false);
+                    CompactionRangeDelAggregator* range_del_agg,
+                    const SequenceNumber stop_before, const bool at_bottom,
+                    const bool allow_data_in_errors,
+                    const BlobFetcher* blob_fetcher,
+                    PrefetchBufferCollection* prefetch_buffers,
+                    CompactionIterationStats* c_iter_stats);
 
   // Filters a merge operand using the compaction filter specified
   // in the constructor. Returns the decision that the filter made.
@@ -152,13 +150,16 @@ class MergeHelper {
 
  private:
   Env* env_;
+  SystemClock* clock_;
   const Comparator* user_comparator_;
   const MergeOperator* user_merge_operator_;
   const CompactionFilter* compaction_filter_;
   const std::atomic<bool>* shutting_down_;
   Logger* logger_;
   bool assert_valid_internal_key_; // enforce no internal key corruption?
+  bool allow_single_operand_;
   SequenceNumber latest_snapshot_;
+  const SnapshotChecker* const snapshot_checker_;
   int level_;
 
   // the scratch area that holds the result of MergeUntil
@@ -204,6 +205,4 @@ class MergeOutputIterator {
   std::vector<Slice>::const_reverse_iterator it_values_;
 };
 
-} // namespace rocksdb
-
-#endif
+}  // namespace ROCKSDB_NAMESPACE
