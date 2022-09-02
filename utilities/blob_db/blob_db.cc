@@ -52,7 +52,7 @@ Status BlobDB::Open(const DBOptions& db_options_input,
         "Blob DB doesn't support non-default column family.");
   }
 
-  BlobDBImpl* blob_db_impl = new BlobDBImpl(dbname, bdb_options, db_options,
+  BlobDBImpl* blob_db_impl = new BlobDBImpl(dbname, bdb_options, db_options_input,
                                             column_families[0].options);
   Status s = blob_db_impl->Open(handles);
   if (s.ok()) {

@@ -8224,7 +8224,6 @@ class Benchmark {
   }
 
 void YCSBFillDB(ThreadState* thread) {
-    //fprintf(stderr, "YCSBFILLDB@@@@@@@@@@@@@\n");
     ReadOptions options(FLAGS_verify_checksum, true);
     RandomGenerator gen;
     std::string value;
@@ -8245,7 +8244,7 @@ void YCSBFillDB(ThreadState* thread) {
       GenerateKeyFromInt(k, FLAGS_num, &key);
 
         //write
-        Status s = db->Put(write_options_, key, gen.Generate(value_size_));
+        Status s = db->Put(write_options_, key, gen.Generate(value_size));
         if (!s.ok()) {
           //fprintf(stderr, "put error: %s\n", s.ToString().c_str());
           //exit(1);
@@ -8324,11 +8323,11 @@ void YCSBFillDB(ThreadState* thread) {
             if (FLAGS_benchmark_write_rate_limit > 0) {
 
                 thread->shared->write_rate_limiter->Request(
-                    value_size_ + key_size_, Env::IO_HIGH,
+                    value_size + key_size_, Env::IO_HIGH,
                     nullptr /* stats */, RateLimiter::OpType::kWrite);
                 thread->stats.ResetLastOpTime();
             }
-            Status s = db->Put(write_options_, key, gen.Generate(value_size_));
+            Status s = db->Put(write_options_, key, gen.Generate(value_size));
             if (!s.ok()) {
               //fprintf(stderr, "put error: %s\n", s.ToString().c_str());
               //exit(1);
@@ -8404,7 +8403,7 @@ void YCSBFillDB(ThreadState* thread) {
       } else{
         //write
         Status s = db->Get(options, key, &value);
-        s = db->Put(write_options_, key, gen.Generate(value_size_));
+        s = db->Put(write_options_, key, gen.Generate(value_size));
         if (!s.ok()) {
           //fprintf(stderr, "put error: %s\n", s.ToString().c_str());
           //exit(1);
@@ -8632,7 +8631,7 @@ void YCSBFillDB(ThreadState* thread) {
 
       } else{
         //write
-        Status s = db->Put(write_options_, key, gen.Generate(value_size_));
+        Status s = db->Put(write_options_, key, gen.Generate(value_size));
         if (!s.ok()) {
           //fprintf(stderr, "put error: %s\n", s.ToString().c_str());
           //exit(1);
@@ -8726,7 +8725,7 @@ void YCSBFillDB(ThreadState* thread) {
         thread->stats.FinishedOps(nullptr, db, 1, kRead);
       } else{
         //write
-        Status s = db->Put(write_options_, key, gen.Generate(value_size_));
+        Status s = db->Put(write_options_, key, gen.Generate(value_size));
         if (!s.ok()) {
           //fprintf(stderr, "put error: %s\n", s.ToString().c_str());
           //exit(1);
@@ -8805,7 +8804,7 @@ void YCSBFillDB(ThreadState* thread) {
       } else{
         //read-modify-write.
         Status s = db->Get(options, key, &value);
-        s = db->Put(write_options_, key, gen.Generate(value_size_));
+        s = db->Put(write_options_, key, gen.Generate(value_size));
         if (!s.ok()) {
           //fprintf(stderr, "put error: %s\n", s.ToString().c_str());
           //exit(1);

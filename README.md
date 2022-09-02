@@ -4,7 +4,7 @@
 [![Appveyor Build status](https://ci.appveyor.com/api/projects/status/fbgfu0so3afcno78/branch/main?svg=true)](https://ci.appveyor.com/project/Facebook/rocksdb/branch/main)
 [![PPC64le Build Status](http://140-211-168-68-openstack.osuosl.org:8080/buildStatus/icon?job=rocksdb&style=plastic)](http://140-211-168-68-openstack.osuosl.org:8080/job/rocksdb)
 
-Forked from https://github.com/facebook/rocksdb/tree/5.7.fb
+Forked from https://github.com/facebook/rocksdb/tree/7.6.fb
 
 
 RocksDB is developed and maintained by Facebook Database Engineering Team.
